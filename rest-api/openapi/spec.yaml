@@ -31356,7 +31356,7 @@ components:
             - boolean
             - 'null'
           description: When true, the server is not locked down during host lifecycle management. When omitted, the existing value is preserved.
-        controlPlane:
+        retainHbnConfigOnBoot:
           type:
             - boolean
             - 'null'

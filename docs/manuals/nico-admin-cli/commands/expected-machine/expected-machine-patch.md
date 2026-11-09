@@ -19,8 +19,8 @@ nico-admin-cli expected-machine patch
 [--dpf-enabled] [--bmc-ip-address] [--extended]
 [--bmc-retain-credentials] [--dpu-policy]
 [--bmc-ip-allocation] [--interfaces]
-[--disable-lockdown] [--control-plane] [--sort-by]
-[-h|--help]
+[--disable-lockdown] [--retain-hbn-config-on-boot]
+[--sort-by] [-h|--help]
 ```
 
 ## DESCRIPTION
@@ -226,15 +226,16 @@ setting
 >
 > - false
 
-`--control-plane <CONTROL_PLANE>`
+`--retain-hbn-config-on-boot <RETAIN_HBN_CONFIG_ON_BOOT>`
 
 Set true to designate the machine as a control-plane machine, or false
 to remove the designation. After completion of
 `<https://github.com/dsx-ai-factory/infra-controller/issues/7568>`, its
 management addresses stay usable while the control plane is down. A
-designated machine requires a fixed or retained IP allocation on every
-host BMC, DPU BMC, and DPU OS interface. Omission preserves the stored
-setting
+designated machine must declare a DPU BMC and a DPU OS interface, and
+requires a fixed or retained IP allocation on the host BMC and on both
+DPU interfaces. A machine whose DPU policy attaches no DPU declares
+neither. Omission preserves the stored setting
 
 *Possible values:*
 
@@ -268,8 +269,8 @@ nico-admin-cli expected-machine patch --bmc-mac-address 00:11:22:33:44:55 --dpu-
 nico-admin-cli expected-machine patch --bmc-mac-address 00:11:22:33:44:55 --bmc-ip-allocation retained
 nico-admin-cli expected-machine patch --bmc-mac-address 00:11:22:33:44:55 --interfaces '[{"mac_address":"02:00:00:00:20:01","fixed_ip":"192.0.2.10"}]'
 nico-admin-cli expected-machine patch --bmc-mac-address 00:11:22:33:44:55 --interfaces '[{"mac_address":"02:00:00:00:20:01","role":"unspecified","ip_allocation":"unspecified","fixed_ip":"192.0.2.10"}]'
-nico-admin-cli expected-machine patch --bmc-mac-address 00:11:22:33:44:55 --control-plane true
-nico-admin-cli expected-machine patch --bmc-mac-address 00:11:22:33:44:55 --control-plane false
+nico-admin-cli expected-machine patch --bmc-mac-address 00:11:22:33:44:55 --retain-hbn-config-on-boot true
+nico-admin-cli expected-machine patch --bmc-mac-address 00:11:22:33:44:55 --retain-hbn-config-on-boot false
 ```
 
 ---

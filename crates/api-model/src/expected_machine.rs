@@ -1047,6 +1047,7 @@ pub struct HostLifecycleProfile {
     /// If unset or false, preserve the default behavior of locking down the server after configuring the BIOS.
     #[serde(default)]
     pub disable_lockdown: Option<bool>,
+    /// TODO(jomeier): reword for retain-hbn-config-on-boot semantics (was control-plane).
     /// If true, designate this machine as a control-plane machine. After
     /// completion of
     /// <https://github.com/dsx-ai-factory/infra-controller/issues/7568>, NICo
@@ -1059,7 +1060,7 @@ pub struct HostLifecycleProfile {
     /// `dpu_policy` attaches no DPU declares neither. If unset or false, the
     /// machine has no control-plane designation.
     #[serde(default)]
-    pub control_plane: Option<bool>,
+    pub retain_hbn_config_on_boot: Option<bool>,
 }
 
 impl HostLifecycleProfile {
@@ -1067,7 +1068,7 @@ impl HostLifecycleProfile {
     /// specify any profile value. Used by the UPDATE path to send SQL `NULL`
     /// so that `COALESCE` preserves the existing DB row.
     pub fn is_empty(&self) -> bool {
-        self.disable_lockdown.is_none() && self.control_plane.is_none()
+        self.disable_lockdown.is_none() && self.retain_hbn_config_on_boot.is_none()
     }
 }
 
@@ -1784,13 +1785,13 @@ mod tests {
 
         let hlp = HostLifecycleProfile {
             disable_lockdown: Some(true),
-            control_plane: None,
+            retain_hbn_config_on_boot: None,
         };
         assert!(!hlp.is_empty());
 
         let hlp = HostLifecycleProfile {
             disable_lockdown: Some(false),
-            control_plane: None,
+            retain_hbn_config_on_boot: None,
         };
         assert!(!hlp.is_empty());
 
@@ -1798,13 +1799,13 @@ mod tests {
         // sends SQL NULL and `COALESCE` silently drops the requested write.
         let hlp = HostLifecycleProfile {
             disable_lockdown: None,
-            control_plane: Some(true),
+            retain_hbn_config_on_boot: Some(true),
         };
         assert!(!hlp.is_empty());
 
         let hlp = HostLifecycleProfile {
             disable_lockdown: None,
-            control_plane: Some(false),
+            retain_hbn_config_on_boot: Some(false),
         };
         assert!(!hlp.is_empty());
     }

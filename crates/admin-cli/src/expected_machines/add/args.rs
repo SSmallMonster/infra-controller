@@ -73,7 +73,7 @@ and the host BMC and both DPU interfaces must use a fixed or retained IP
 allocation:
     $ nico-admin-cli expected-machine add --bmc-mac-address 00:11:22:33:44:55 \
     --bmc-username admin --bmc-password mypassword --chassis-serial-number sample_serial-1 \
-    --control-plane true \
+    --retain-hbn-config-on-boot true \
     --interfaces '[{\"mac_address\":\"00:11:22:33:44:55\",\"role\":\"host_bmc\",\"ip_allocation\":\"retained\"}]'
 
 ")]
@@ -210,11 +210,11 @@ pub(crate) struct Args {
     disable_lockdown: Option<bool>,
 
     #[clap(
-        long = "control-plane",
-        value_name = "CONTROL_PLANE",
+        long = "retain-hbn-config-on-boot",
+        value_name = "RETAIN_HBN_CONFIG_ON_BOOT",
         help = "If true, designate the machine as a control-plane machine. After completion of <https://github.com/dsx-ai-factory/infra-controller/issues/7568>, its management addresses stay usable while the control plane is down. The machine must declare a DPU BMC and a DPU OS interface, and the host BMC and both DPU interfaces must then use a fixed or retained IP allocation. A machine whose DPU policy attaches no DPU declares neither. If unset or false, the machine has no control-plane designation."
     )]
-    control_plane: Option<bool>,
+    retain_hbn_config_on_boot: Option<bool>,
 }
 
 impl Args {
@@ -269,10 +269,10 @@ impl TryFrom<Args> for rpc::forge::ExpectedMachine {
             bmc_ip_allocation: value.bmc_ip_allocation.map(|m| m as i32),
             replace_host_nics: false,
             host_lifecycle_profile: (value.disable_lockdown.is_some()
-                || value.control_plane.is_some())
+                || value.retain_hbn_config_on_boot.is_some())
             .then_some(rpc::forge::HostLifecycleProfile {
                 disable_lockdown: value.disable_lockdown,
-                control_plane: value.control_plane,
+                retain_hbn_config_on_boot: value.retain_hbn_config_on_boot,
             }),
             server_name: None,
         })
