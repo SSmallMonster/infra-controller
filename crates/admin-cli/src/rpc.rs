@@ -1287,7 +1287,7 @@ impl ApiClient {
             .is_some_and(|profile| profile.retain_hbn_config_on_boot.is_some())
         {
             return Err(CarbideCliError::UnsupportedOperation(
-                "this site cannot store a control-plane designation. Upgrade the site, or retry \
+                "this site cannot store a retain-hbn-config-on-boot designation. Upgrade the site, or retry \
                  without --retain-hbn-config-on-boot",
             ));
         }

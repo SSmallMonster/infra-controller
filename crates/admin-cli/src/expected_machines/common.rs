@@ -191,7 +191,7 @@ pub(crate) struct HostLifecycleProfile {
     #[serde(default)]
     pub(crate) disable_lockdown: Option<bool>,
     /// If true, designates the machine to retain its HBN configuration on boot.
-    /// Requires that DPU BMC, DPU OS, and host DPU interfaces by marked
+    /// Requires that DPU BMC, DPU OS, and host DPU interfaces be marked
     /// as retain or fixed.
     #[serde(default)]
     pub(crate) retain_hbn_config_on_boot: Option<bool>,

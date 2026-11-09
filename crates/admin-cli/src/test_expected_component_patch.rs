@@ -591,7 +591,7 @@ async fn unsupported_machine_patches_use_the_original_read_merge_update() {
             },
         },
         Case {
-            scenario: "legacy lockdown patch keeps the stored control-plane designation",
+            scenario: "legacy lockdown patch keeps the stored retain-hbn-config-on-boot designation",
             args: &[
                 "expected-machine",
                 "patch",
@@ -936,9 +936,9 @@ async fn legacy_fallback_rejects_a_retain_hbn_config_on_boot_designation() {
         Some(ID),
     )
     .await;
-    let error = result.expect_err("the legacy update cannot store a control-plane designation");
+    let error = result.expect_err("the legacy update cannot store a retain-hbn-config-on-boot designation");
     assert!(
-        error.to_string().contains("control-plane designation"),
+        error.to_string().contains("retain-hbn-config-on-boot designation"),
         "unexpected error: {error}"
     );
     // The legacy read/merge/update must not run at all.

@@ -228,14 +228,13 @@ setting
 
 `--retain-hbn-config-on-boot <RETAIN_HBN_CONFIG_ON_BOOT>`
 
-Set true to designate the machine as a control-plane machine, or false
-to remove the designation. After completion of
-`<https://github.com/dsx-ai-factory/infra-controller/issues/7568>`, its
-management addresses stay usable while the control plane is down. A
-designated machine must declare a DPU BMC and a DPU OS interface, and
-requires a fixed or retained IP allocation on the host BMC and on both
-DPU interfaces. A machine whose DPU policy attaches no DPU declares
-neither. Omission preserves the stored setting
+If true, designate the machine to retain its HBN config on boot.
+This allows the machine to boot while NICO's DHCP and REST services
+are unavailable. The machine must declare a DPU BMC and a DPU OS
+interface, and the host BMC and both DPU interfaces must then use a
+fixed or retained IP allocation. A machine whose DPU policy attaches
+no DPU declares neither. If unset or false, the machine will need NICo
+to be up in order to boot.
 
 *Possible values:*
 

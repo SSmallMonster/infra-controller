@@ -1163,7 +1163,7 @@ pub struct HostProfile {
     /// When `true` the ingestion state machine skips re-enabling lockdown
     /// after BIOS/UEFI configuration.
     pub disable_lockdown: bool,
-    /// When `true` this machine is designated as a control-plane machine.
+    /// When `true` this machine is designated to retain-hbn-config-on-boot.
     /// After completion of
     /// <https://github.com/dsx-ai-factory/infra-controller/issues/7568>, its
     /// management addresses stay usable while the control plane is down. No

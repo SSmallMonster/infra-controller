@@ -108,13 +108,13 @@ Reset that role to Host and infer Fixed allocation from fixed_ip:
     $ nico-admin-cli expected-machine patch --bmc-mac-address 00:11:22:33:44:55 \
     --interfaces '[{\"mac_address\":\"02:00:00:00:20:01\",\"role\":\"unspecified\",\"ip_allocation\":\"unspecified\",\"fixed_ip\":\"192.0.2.10\"}]'
 
-Designate the machine as a control-plane machine. It must already declare a DPU
+Designate the machine to retain-hbn-config-on-boot. It must already declare a DPU
 BMC and a DPU OS interface, and the host BMC and both DPU interfaces must use a
 fixed or retained IP allocation:
     $ nico-admin-cli expected-machine patch --bmc-mac-address 00:11:22:33:44:55 \
     --retain-hbn-config-on-boot true
 
-Remove the control-plane designation:
+Remove the retain-hbn-config-on-boot designation:
     $ nico-admin-cli expected-machine patch --bmc-mac-address 00:11:22:33:44:55 \
     --retain-hbn-config-on-boot false
 
@@ -264,7 +264,7 @@ pub(crate) struct Args {
         long = "retain-hbn-config-on-boot",
         value_name = "RETAIN_HBN_CONFIG_ON_BOOT",
         group = "group",
-        help = "Set true to designate the machine as a control-plane machine, or false to remove the designation. After completion of <https://github.com/dsx-ai-factory/infra-controller/issues/7568>, its management addresses stay usable while the control plane is down. A designated machine must declare a DPU BMC and a DPU OS interface, and requires a fixed or retained IP allocation on the host BMC and on both DPU interfaces. A machine whose DPU policy attaches no DPU declares neither. Omission preserves the stored setting"
+        help = "If true, designate the machine to retain its HBN config on boot. This allows the machine to boot while NICO's DHCP and REST services are unavailable. The machine must declare a DPU BMC and a DPU OS interface, and the host BMC and both DPU interfaces must then use a fixed or retained IP allocation. A machine whose DPU policy attaches no DPU declares neither. If unset or false, the machine will need NICo to be up in order to boot."
     )]
     pub(super) retain_hbn_config_on_boot: Option<bool>,
 }

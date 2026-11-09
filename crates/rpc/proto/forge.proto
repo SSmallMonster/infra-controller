@@ -12748,7 +12748,7 @@ message PatchExpectedMachineRequest {
   // otherwise it must parse as IPv4 or IPv6. Selected optional booleans and
   // enums must be present. False disables the selected setting; for
   // `disable_lockdown`, it restores lockdown; for `retain_hbn_config_on_boot`, it removes the
-  // control-plane designation. `DPU_MODE_UNSPECIFIED` resets to
+  // retain-hbn-config-on-boot designation. `DPU_MODE_UNSPECIFIED` resets to
   // site inheritance. Selecting only `bmc_ip_address` preserves the merged
   // allocation policy; an address incompatible with that policy is rejected.
   // Select `bmc_ip_allocation` with `BMC_IP_ALLOCATION_TYPE_UNSPECIFIED` to
