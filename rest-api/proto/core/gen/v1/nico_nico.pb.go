@@ -41336,13 +41336,11 @@ type HostLifecycleProfile struct {
 	// If true, do not lock down the server as part of host lifecycle management. If unset or false, preserve
 	// the default behavior of locking down the server after configuring the BIOS.
 	DisableLockdown *bool `protobuf:"varint,1,opt,name=disable_lockdown,json=disableLockdown,proto3,oneof" json:"disable_lockdown,omitempty"`
-	// If true, designate the machine as a control-plane machine. After completion
-	// of https://github.com/dsx-ai-factory/infra-controller/issues/7568, its
-	// management addresses stay usable while the control plane is down. The
-	// machine must declare a DPU BMC and a DPU OS interface, and the host BMC
-	// and both DPU interfaces must then use a fixed or retained IP allocation.
-	// A machine whose dpu_policy attaches no DPU declares neither. If unset or
-	// false, the machine has no control-plane designation.
+	// If true, designate the machine to retain HBN config on boot even if NICo
+	// is unavailable. The machine must declare a DPU BMC and a DPU OS interface,
+	// and the host BMC and both DPU interfaces must then use a fixed or retained
+	// IP allocation. A machine whose dpu_policy attaches no DPU declares neither.
+	// If unset or false, the machine does not retain the configuration.
 	RetainHbnConfigOnBoot *bool `protobuf:"varint,2,opt,name=retain_hbn_config_on_boot,json=retainHbnConfigOnBoot,proto3,oneof" json:"retain_hbn_config_on_boot,omitempty"`
 	unknownFields         protoimpl.UnknownFields
 	sizeCache             protoimpl.SizeCache

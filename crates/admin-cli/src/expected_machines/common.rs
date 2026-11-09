@@ -190,13 +190,9 @@ pub(crate) struct HostLifecycleProfile {
     /// If unset or false, preserve the default behavior of locking down the server after configuring the BIOS.
     #[serde(default)]
     pub(crate) disable_lockdown: Option<bool>,
-    /// TODO(jomeier): reword for retain-hbn-config-on-boot semantics (was control-plane).
-    /// If true, designate the machine as a control-plane machine. The API
-    /// records the designation, requires a declared DPU BMC and DPU OS
-    /// interface, and requires a fixed or retained IP allocation on the host
-    /// BMC and both DPU interfaces. A machine whose dpu_policy attaches no DPU
-    /// declares neither. If unset or false, the machine has no control-plane
-    /// designation.
+    /// If true, designates the machine to retain its HBN configuration on boot.
+    /// Requires that DPU BMC, DPU OS, and host DPU interfaces by marked
+    /// as retain or fixed.
     #[serde(default)]
     pub(crate) retain_hbn_config_on_boot: Option<bool>,
 }

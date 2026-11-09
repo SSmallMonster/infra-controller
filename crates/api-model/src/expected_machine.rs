@@ -1047,18 +1047,8 @@ pub struct HostLifecycleProfile {
     /// If unset or false, preserve the default behavior of locking down the server after configuring the BIOS.
     #[serde(default)]
     pub disable_lockdown: Option<bool>,
-    /// TODO(jomeier): reword for retain-hbn-config-on-boot semantics (was control-plane).
-    /// If true, designate this machine as a control-plane machine. After
-    /// completion of
-    /// <https://github.com/dsx-ai-factory/infra-controller/issues/7568>, NICo
-    /// keeps its management addresses usable while the control plane is down,
-    /// so the machine and its DPU can complete a full power-on cycle without
-    /// NICo. The machine must declare a `DpuBmc` and a `DpuOs` interface, and
-    /// the host BMC and both DPU interfaces must resolve to a `Fixed` or
-    /// `Retained` allocation; see
-    /// [`ExpectedInterface::resolved_ip_allocation`]. A machine whose
-    /// `dpu_policy` attaches no DPU declares neither. If unset or false, the
-    /// machine has no control-plane designation.
+    /// If true, designate this machine to retain its HBN configuration on boot even
+    /// if NICo is unavailable.
     #[serde(default)]
     pub retain_hbn_config_on_boot: Option<bool>,
 }

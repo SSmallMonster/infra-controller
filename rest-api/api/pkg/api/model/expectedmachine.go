@@ -280,11 +280,10 @@ type APIHostLifecycleProfile struct {
 	// DisableLockdown, when true, skips locking down the server during host
 	// lifecycle management. When omitted, the existing value is preserved.
 	DisableLockdown *bool `json:"disableLockdown"`
-	// TODO(jomeier): reword for retain-hbn-config-on-boot semantics (was control-plane).
-	// RetainHBNConfigOnBoot, when true, designates the machine as a control-plane
-	// machine. After completion of
-	// https://github.com/dsx-ai-factory/infra-controller/issues/7568, its
-	// management addresses stay usable while the control plane is down. When
+	// RetainHBNConfigOnBoot, when true, designates the machine to retain HBN
+	// config on boot even if NICo is unavailable. The
+	// machine must declare a DPU BMC and a DPU OS interface, and the host BMC
+	// and both DPU interfaces must then use a fixed or retained IP allocation. When
 	// omitted, the existing value is preserved.
 	RetainHBNConfigOnBoot *bool `json:"retainHbnConfigOnBoot"`
 }

@@ -186,28 +186,16 @@ fn validate_expected_machine_for_insert(machine: &ExpectedMachine) -> Result<(),
     Ok(())
 }
 
-/// TODO(jomeier): reword for retain-hbn-config-on-boot semantics (was control-plane).
-/// Rejects a control-plane designation that depends on DHCP to come back.
+/// Validate retain-hbn-config-on-boot configuration rules.
 ///
-/// A control-plane machine must complete a full power-on cycle while the
-/// control plane is down, so NICo has to know each management address up
-/// front. `Fixed` and `Retained` both resolve to an address NICo can push into
-/// the device; `Dynamic` leaves it to a DHCP server that is unavailable in
-/// exactly the outage this designation exists for. Host data interfaces are
-/// unconstrained, because they are not on the path that brings the machine and
-/// its DPU back without NICo.
+/// A machine with a retain-hbn-config-on-boot is meant to be able to perform
+/// a full power cycle while NICo, including its DHCP service, is entirely offline. A control-plane machine must complete a full power-on cycle while the
+/// Therefore, the host BMC, and DPU BMC, and BMC must all be configured as
+/// `Fixed` or `Retained` interfaces.
 ///
 /// The Host BMC is judged through `effective_host_bmc`, because
 /// `normalize_host_bmc` deliberately leaves a legacy-only declaration in the
-/// compatibility columns instead of `interfaces`. Walking `interfaces` alone
-/// accepts a Dynamic Host BMC that every runtime reader then honours.
-/// Normalization runs before this check, so both representations agree here.
-///
-/// The DPU roles have no such fallback, and nothing synthesizes them. A DPU MAC
-/// that first appears through DHCP creates its interface with a dynamic lease,
-/// which this check would never see. A designated machine must therefore
-/// declare a `DpuBmc` and a `DpuOs` interface, unless its `dpu_policy` attaches
-/// no DPU.
+/// compatibility columns instead of `interfaces`.
 fn validate_retain_hbn_config_on_boot_designation(
     machine: &ExpectedMachine,
 ) -> Result<(), CarbideError> {
