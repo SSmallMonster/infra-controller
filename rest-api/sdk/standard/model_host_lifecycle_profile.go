@@ -24,7 +24,7 @@ var _ MappedNullable = &HostLifecycleProfile{}
 type HostLifecycleProfile struct {
 	// When true, the server is not locked down during host lifecycle management. When omitted, the existing value is preserved.
 	DisableLockdown NullableBool `json:"disableLockdown,omitempty"`
-	// When true, the machine is designated to retain HBN config on boot. After completion of https://github.com/dsx-ai-factory/infra-controller/issues/7568, its management addresses stay usable while the control plane is down. A designated machine must declare a dpu_bmc and a dpu_os interface, and requires a fixed or retained IP allocation on the host BMC and on both DPU interfaces. A machine whose dpuPolicy attaches no DPU declares neither. When omitted, the existing value is preserved.
+	// When true, the machine is designated to retain HBN configuration on boot. After completion of https://github.com/dsx-ai-factory/infra-controller/issues/7568, its management addresses stay usable while the control plane is down. A designated machine must declare a dpu_bmc and a dpu_os interface, and requires a fixed or retained IP allocation on the host BMC and on both DPU interfaces. A machine whose dpuPolicy attaches no DPU declares neither. When omitted, the existing value is preserved.
 	RetainHbnConfigOnBoot NullableBool `json:"retainHbnConfigOnBoot,omitempty"`
 }
 
