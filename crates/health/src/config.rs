@@ -31,6 +31,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use tokio::sync::Semaphore;
 use url::Url;
 
+use crate::collectors::CANCELLED_CONNECT_GRACE;
 use crate::metrics::BmcLatencyAttribute;
 
 const MAX_GNMI_RECONCILE_INTERVAL: Duration = Duration::from_secs(366 * 24 * 60 * 60);
@@ -635,9 +636,26 @@ pub struct TracingSinkConfig {
     pub include_diagnostics: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+/// Startup settings for Prometheus telemetry responses. Changes require a restart.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
-pub struct PrometheusSinkConfig {}
+pub struct PrometheusSinkConfig {
+    /// Offer negotiated gzip on `/telemetry`. Defaults to `false`.
+    pub gzip: bool,
+
+    /// Gzip compression level from 1 through 9. Defaults to 1 and is validated
+    /// whenever the sink is enabled, including when gzip is disabled.
+    pub gzip_level: u32,
+}
+
+impl Default for PrometheusSinkConfig {
+    fn default() -> Self {
+        Self {
+            gzip: false,
+            gzip_level: 1,
+        }
+    }
+}
 
 /// Configuration for the JSONL log file sink.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1540,6 +1558,24 @@ pub struct SseLogConfig {
     /// Maximum retry backoff after repeated streaming connection failures.
     #[serde(with = "humantime_serde")]
     pub max_backoff: Duration,
+
+    /// Deadline for deleting the BMC subscription a closed stream opened, and for
+    /// each cap diagnosis: listing the BMC's subscriptions plus any `reap_on_cap`
+    /// sweep. In `sse` and `auto` log modes, validation requires it plus 5 s for a
+    /// cancelled connect to finish to be less than `shutdown_timeout`. Defaults
+    /// to 5 seconds and must be greater than zero.
+    #[serde(with = "humantime_serde")]
+    pub close_timeout: Duration,
+
+    /// Delete every SSE destination on a BMC at its cap. Enable only where
+    /// hw-health is the BMC's sole SSE consumer. Has no effect on BMCs that drop
+    /// a capped SSE open without an HTTP response (LiteOn). Disabled by default.
+    ///
+    /// Each BMC is swept at most once per 30 minutes, and recovery does not
+    /// reset that interval. The DELETEs run one at a time within `close_timeout`,
+    /// so a sweep can stop before reaching every destination; the rest wait for
+    /// the next sweep.
+    pub reap_on_cap: bool,
 }
 
 impl Default for SseLogConfig {
@@ -1547,6 +1583,8 @@ impl Default for SseLogConfig {
         Self {
             initial_backoff: Duration::from_secs(1),
             max_backoff: Duration::from_secs(30),
+            close_timeout: Duration::from_secs(5),
+            reap_on_cap: false,
         }
     }
 }
@@ -1566,6 +1604,10 @@ impl SseLogConfig {
                 "[collectors.logs.sse].max_backoff must be greater than or equal to initial_backoff"
                     .to_string(),
             );
+        }
+
+        if self.close_timeout.is_zero() {
+            return Err("[collectors.logs.sse].close_timeout must be greater than 0".to_string());
         }
 
         Ok(())
@@ -2857,6 +2899,12 @@ impl Config {
             ));
         }
 
+        if let Configurable::Enabled(prometheus) = &self.sinks.prometheus
+            && !(1..=9).contains(&prometheus.gzip_level)
+        {
+            return Err("sinks.prometheus.gzip_level must be from 1 through 9".to_string());
+        }
+
         self.metrics.validate()?;
 
         if let Configurable::Enabled(rate_limit) = &self.rate_limit
@@ -2915,6 +2963,18 @@ impl Config {
 
         if let Configurable::Enabled(logs) = &self.collectors.logs {
             logs.validate()?;
+
+            // A cancelled connect may run for the grace before the DELETE starts.
+            if logs.mode != LogCollectionMode::Periodic
+                && CANCELLED_CONNECT_GRACE
+                    .checked_add(logs.sse_or_default().close_timeout)
+                    .is_none_or(|close| close >= self.shutdown_timeout)
+            {
+                return Err(format!(
+                    "[collectors.logs.sse].close_timeout plus the {}s cancelled-connect grace must be less than shutdown_timeout",
+                    CANCELLED_CONNECT_GRACE.as_secs()
+                ));
+            }
         }
 
         if let Configurable::Enabled(nvue) = &self.collectors.nvue
@@ -3094,6 +3154,40 @@ mod tests {
     use carbide_test_support::{Check, check_values, scenarios, value_scenarios};
 
     use super::*;
+
+    #[test]
+    fn prometheus_gzip_defaults_bounds_and_disabled_payloads() {
+        let invalid_level = "sinks.prometheus.gzip_level must be from 1 through 9";
+
+        value_scenarios!(run = |input: &str| {
+            let config: Config = Figment::new().merge(Toml::string(input)).extract().unwrap();
+
+            let settings = config.sinks.prometheus.as_option().map(|sink| (sink.gzip, sink.gzip_level));
+
+            (settings, config.validate())
+        };
+            "defaults" {
+                "" => (Some((false, 1)), Ok(())),
+                "[sinks.prometheus]\nenabled = true" => (Some((false, 1)), Ok(())),
+            }
+
+            "gzip settings" {
+                "[sinks.prometheus]\ngzip = true" => (Some((true, 1)), Ok(())),
+                "[sinks.prometheus]\ngzip = true\ngzip_level = 9" => (Some((true, 9)), Ok(())),
+            }
+
+            "invalid levels" {
+                "[sinks.prometheus]\ngzip_level = 0" => (Some((false, 0)), Err(invalid_level.into())),
+                "[sinks.prometheus]\ngzip = true\ngzip_level = 10" =>
+                    (Some((true, 10)), Err(invalid_level.into())),
+            }
+
+            "disabled malformed payload" {
+                "[sinks.prometheus]\nenabled = false\ngzip = 1\ngzip_level = \"invalid\"" =>
+                    (None, Ok(())),
+            }
+        );
+    }
 
     #[test]
     fn gnmi_reconciliation_config_contract() {
@@ -3738,6 +3832,32 @@ mac = "00:11:22:33:44:55"
                 }) => FailsWith(
                     "endpoint_discovery_interval must be greater than 0".to_string()
                 ),
+
+                config_with(|config| {
+                    config.collectors.logs = Configurable::Enabled(LogsCollectorConfig {
+                        sse: Some(SseLogConfig {
+                            close_timeout: config.shutdown_timeout - CANCELLED_CONNECT_GRACE,
+                            ..SseLogConfig::default()
+                        }),
+                        ..LogsCollectorConfig::default()
+                    });
+                }) => FailsWith(
+                    "[collectors.logs.sse].close_timeout plus the 5s cancelled-connect grace must be less than shutdown_timeout"
+                        .to_string()
+                ),
+
+                // Periodic mode opens no SSE stream, so it has nothing to delete on shutdown.
+                config_with(|config| {
+                    config.collectors.logs = Configurable::Enabled(LogsCollectorConfig {
+                        mode: LogCollectionMode::Periodic,
+                        sse: Some(SseLogConfig {
+                            close_timeout: config.shutdown_timeout,
+                            ..SseLogConfig::default()
+                        }),
+                        periodic: Some(PeriodicLogConfig::default()),
+                        ..LogsCollectorConfig::default()
+                    });
+                }) => Yields(()),
 
                 config_with(|config| {
                     config.bmc_request_concurrency =
@@ -6572,9 +6692,19 @@ switch = { serial = "SN-SW-001", physical_slot_number = 7, compute_tray_index = 
                 SseLogConfig {
                     initial_backoff: Duration::from_secs(30),
                     max_backoff: Duration::from_secs(1),
+                    ..SseLogConfig::default()
                 } => FailsWith(
                     "[collectors.logs.sse].max_backoff must be greater than or equal to initial_backoff"
                         .to_string()
+                ),
+            }
+
+            "zero close timeout" {
+                SseLogConfig {
+                    close_timeout: Duration::ZERO,
+                    ..SseLogConfig::default()
+                } => FailsWith(
+                    "[collectors.logs.sse].close_timeout must be greater than 0".to_string()
                 ),
             }
         );
@@ -6707,6 +6837,7 @@ switch = { serial = "SN-SW-001", physical_slot_number = 7, compute_tray_index = 
                     sse: Some(SseLogConfig {
                         initial_backoff: Duration::from_secs(30),
                         max_backoff: Duration::from_secs(1),
+                        ..SseLogConfig::default()
                     }),
                     ..LogsCollectorConfig::default()
                 } => FailsWith(
@@ -6984,12 +7115,14 @@ max_backoff = "1m"
                     configured_sse: Some(SseLogConfig {
                         initial_backoff: Duration::from_secs(2),
                         max_backoff: Duration::from_secs(60),
+                        ..SseLogConfig::default()
                     }),
                     configured_periodic: None,
                     configured_auto: None,
                     effective_sse: SseLogConfig {
                         initial_backoff: Duration::from_secs(2),
                         max_backoff: Duration::from_secs(60),
+                        ..SseLogConfig::default()
                     },
                     effective_periodic: PeriodicLogConfig::default(),
                     effective_auto_periodic: PeriodicLogConfig::default(),
@@ -7072,12 +7205,14 @@ max_backoff = "45s"
                     configured_sse: Some(SseLogConfig {
                         initial_backoff: Duration::from_secs(3),
                         max_backoff: Duration::from_secs(45),
+                        ..SseLogConfig::default()
                     }),
                     configured_periodic: None,
                     configured_auto: None,
                     effective_sse: SseLogConfig {
                         initial_backoff: Duration::from_secs(3),
                         max_backoff: Duration::from_secs(45),
+                        ..SseLogConfig::default()
                     },
                     effective_periodic: PeriodicLogConfig::default(),
                     effective_auto_periodic: PeriodicLogConfig::default(),
