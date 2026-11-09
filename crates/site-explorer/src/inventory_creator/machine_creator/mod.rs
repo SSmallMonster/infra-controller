@@ -56,6 +56,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::Config;
 use crate::IdentifiedManagedHost;
+use crate::bmc_endpoint_explorer::record_machine_identity;
 use crate::boot_interfaces::reconcile_desired_boot_interface;
 use crate::dpu_loopback::{PreparedDpuLoopback, acquire_admin_admission};
 use crate::errors::{SiteExplorerError, SiteExplorerResult};
@@ -329,6 +330,7 @@ impl MachineCreator {
     /// Records an observation for each attempted stage: admission, the creation
     /// transaction, and after-commit repair when a host was committed. Rejected
     /// preparation reaches none of those stages.
+    #[tracing::instrument(skip_all, name = "ingest_managed_host")]
     async fn create_managed_host_with_selection(
         &self,
         explored_host: &ExploredManagedHost,
@@ -337,6 +339,12 @@ impl MachineCreator {
         primary_interface_selection: Option<HostPrimaryInterfaceSelection>,
         pool: &PgPool,
     ) -> SiteExplorerResult<ManagedHostCreation> {
+        trace_propagation::MachineTraceAttributes {
+            bmc_ip: Some(explored_host.host_bmc_ip),
+            managed_host_bmc_ip: Some(explored_host.host_bmc_ip),
+            ..Default::default()
+        }
+        .record_on(&tracing::Span::current());
         let Some(expected_machine) = expected_machine else {
             tracing::warn!(
                 host_bmc_ip_address = %explored_host.host_bmc_ip,
@@ -417,6 +425,7 @@ impl MachineCreator {
         let (creation, _admin_admission) = creation?;
 
         if let Some(host_machine_id) = creation.committed_host_machine_id() {
+            record_machine_identity(&host_machine_id.into(), Some(explored_host.host_bmc_ip));
             // Normalize host admin address ownership now that every DPU-backed
             // host interface is attached and the primary flags are committed.
             let repair_start = Instant::now();
@@ -1045,6 +1054,10 @@ impl MachineCreator {
         predicted_machine_id: &MachineId,
         machine_data: Option<&ExpectedMachineData>,
     ) -> SiteExplorerResult<()> {
+        record_machine_identity(
+            predicted_machine_id,
+            managed_host.explored_host.bmc_info().ip,
+        );
         _ = db::machine::create(
             txn,
             Some(&self.common_pools),
@@ -1107,12 +1120,14 @@ impl MachineCreator {
     // create_dpu_machine creates a machine for the DPU as specified by dpu_machine_id. Returns an Optional Machine indicating whether the function created a new machine (returns None if a machine already existed for this DPU).
     // if an entry exists in the machines table with a machine ID which matches dpu_machine_id, a machine has already been created for this DPU. Returns None.
     // if an entry doesnt exist in the machine table, the site explorer will add an entry in the machines table for the DPU and update its network config appropriately (allocating a loop ip address etc). Return the newly created machine.
+    #[tracing::instrument(skip_all, name = "ingest_dpu")]
     async fn create_dpu_machine(
         &self,
         txn: &mut PgConnection,
         explored_dpu: &ExploredDpu,
     ) -> SiteExplorerResult<Option<AnyMachine>> {
         let dpu_machine_id = explored_dpu.report.machine_id.as_ref().unwrap();
+        record_machine_identity(dpu_machine_id, explored_dpu.bmc_info().ip);
         match db::machine::find_one(&mut *txn, dpu_machine_id, MachineSearchConfig::default())
             .await?
         {
@@ -1297,6 +1312,7 @@ impl MachineCreator {
             SiteExplorerError::InvalidArgument(format!("hardware info missing: {e}"))
         })?;
 
+        record_machine_identity(&predicted_machine_id, explored_host.bmc_info().ip);
         let _host_machine = db::machine::create(
             txn,
             Some(&self.common_pools),
