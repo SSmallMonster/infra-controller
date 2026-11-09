@@ -577,11 +577,10 @@ func assertVPCRoutingProfileProviderOnly(t *testing.T, method, body string) {
 	}
 }
 
-func TestGetVPCRoutingProfileDefinitionHandler_Handle(t *testing.T) {
+func TestGetAllVPCRoutingProfileDefinitionHandler_Handle(t *testing.T) {
 	cases := []struct {
 		name    string
 		tenant  bool
-		detail  bool
 		prepare func(*testing.T, *profileQueryFixture)
 		status  int
 		calls   int
@@ -590,14 +589,12 @@ func TestGetVPCRoutingProfileDefinitionHandler_Handle(t *testing.T) {
 		{
 			name:   "provider omitted filters remain omitted",
 			tenant: false,
-			detail: false,
 			status: http.StatusOK,
 			calls:  2,
 		},
 		{
 			name:   "provider forwards explicit false and zero",
 			tenant: false,
-			detail: false,
 			status: http.StatusOK,
 			calls:  2,
 			prepare: func(t *testing.T, f *profileQueryFixture) {
@@ -610,7 +607,6 @@ func TestGetVPCRoutingProfileDefinitionHandler_Handle(t *testing.T) {
 		{
 			name:   "provider forwards true and maximum tier",
 			tenant: false,
-			detail: false,
 			status: http.StatusOK,
 			calls:  2,
 			prepare: func(t *testing.T, f *profileQueryFixture) {
@@ -623,26 +619,14 @@ func TestGetVPCRoutingProfileDefinitionHandler_Handle(t *testing.T) {
 			},
 		},
 		{
-			name:   "provider viewer can read",
-			tenant: false,
-			detail: true,
-			status: http.StatusOK,
-			calls:  1,
-			prepare: func(t *testing.T, f *profileQueryFixture) {
-				f.user = common.TestBuildUser(t, f.db, uuid.NewString(), f.org, []string{authz.ProviderViewerRole})
-			},
-		},
-		{
 			name:   "tenant omitted minimum uses default",
 			tenant: true,
-			detail: false,
 			status: http.StatusOK,
 			calls:  4,
 		},
 		{
 			name:   "tenant equal minimum allowed",
 			tenant: true,
-			detail: false,
 			status: http.StatusOK,
 			calls:  4,
 			prepare: func(t *testing.T, f *profileQueryFixture) {
@@ -652,7 +636,6 @@ func TestGetVPCRoutingProfileDefinitionHandler_Handle(t *testing.T) {
 		{
 			name:   "tenant higher minimum preserved",
 			tenant: true,
-			detail: false,
 			status: http.StatusOK,
 			calls:  4,
 			prepare: func(t *testing.T, f *profileQueryFixture) {
@@ -663,7 +646,6 @@ func TestGetVPCRoutingProfileDefinitionHandler_Handle(t *testing.T) {
 		{
 			name:    "tenant lower minimum rejected before listing",
 			tenant:  true,
-			detail:  false,
 			status:  http.StatusForbidden,
 			calls:   2,
 			message: "access tiers lower",
@@ -674,7 +656,6 @@ func TestGetVPCRoutingProfileDefinitionHandler_Handle(t *testing.T) {
 		{
 			name:   "unset default tier is zero",
 			tenant: true,
-			detail: false,
 			status: http.StatusOK,
 			calls:  4,
 			prepare: func(t *testing.T, f *profileQueryFixture) {
@@ -686,17 +667,6 @@ func TestGetVPCRoutingProfileDefinitionHandler_Handle(t *testing.T) {
 		{
 			name:   "unprivileged tenant denied list",
 			tenant: true,
-			detail: false,
-			status: http.StatusForbidden,
-			calls:  0,
-			prepare: func(t *testing.T, f *profileQueryFixture) {
-				f.setPrivilege(t, false)
-			},
-		},
-		{
-			name:   "unprivileged tenant denied detail",
-			tenant: true,
-			detail: true,
 			status: http.StatusForbidden,
 			calls:  0,
 			prepare: func(t *testing.T, f *profileQueryFixture) {
@@ -706,7 +676,6 @@ func TestGetVPCRoutingProfileDefinitionHandler_Handle(t *testing.T) {
 		{
 			name:   "site denial overrides account grant",
 			tenant: true,
-			detail: false,
 			status: http.StatusForbidden,
 			calls:  0,
 			prepare: func(t *testing.T, f *profileQueryFixture) {
@@ -716,7 +685,6 @@ func TestGetVPCRoutingProfileDefinitionHandler_Handle(t *testing.T) {
 		{
 			name:   "site grant allows read",
 			tenant: true,
-			detail: false,
 			status: http.StatusOK,
 			calls:  4,
 			prepare: func(t *testing.T, f *profileQueryFixture) {
@@ -727,7 +695,6 @@ func TestGetVPCRoutingProfileDefinitionHandler_Handle(t *testing.T) {
 		{
 			name:   "foreign provider privilege insufficient",
 			tenant: true,
-			detail: false,
 			status: http.StatusForbidden,
 			calls:  0,
 			prepare: func(t *testing.T, f *profileQueryFixture) {
@@ -739,7 +706,6 @@ func TestGetVPCRoutingProfileDefinitionHandler_Handle(t *testing.T) {
 		{
 			name:   "pending account denied",
 			tenant: true,
-			detail: false,
 			status: http.StatusForbidden,
 			calls:  0,
 			prepare: func(t *testing.T, f *profileQueryFixture) {
@@ -750,7 +716,6 @@ func TestGetVPCRoutingProfileDefinitionHandler_Handle(t *testing.T) {
 		{
 			name:   "provider cannot read another providers site",
 			tenant: false,
-			detail: false,
 			status: http.StatusForbidden,
 			calls:  0,
 			prepare: func(t *testing.T, f *profileQueryFixture) {
@@ -762,7 +727,6 @@ func TestGetVPCRoutingProfileDefinitionHandler_Handle(t *testing.T) {
 		{
 			name:   "missing user",
 			tenant: false,
-			detail: false,
 			status: http.StatusInternalServerError,
 			calls:  0,
 			prepare: func(t *testing.T, f *profileQueryFixture) {
@@ -772,7 +736,6 @@ func TestGetVPCRoutingProfileDefinitionHandler_Handle(t *testing.T) {
 		{
 			name:   "wrong org",
 			tenant: false,
-			detail: false,
 			status: http.StatusForbidden,
 			calls:  0,
 			prepare: func(t *testing.T, f *profileQueryFixture) {
@@ -782,7 +745,6 @@ func TestGetVPCRoutingProfileDefinitionHandler_Handle(t *testing.T) {
 		{
 			name:   "wrong role",
 			tenant: false,
-			detail: false,
 			status: http.StatusForbidden,
 			calls:  0,
 			prepare: func(t *testing.T, f *profileQueryFixture) {
@@ -792,7 +754,6 @@ func TestGetVPCRoutingProfileDefinitionHandler_Handle(t *testing.T) {
 		{
 			name:   "missing site",
 			tenant: false,
-			detail: false,
 			status: http.StatusBadRequest,
 			calls:  0,
 			prepare: func(t *testing.T, f *profileQueryFixture) {
@@ -802,7 +763,6 @@ func TestGetVPCRoutingProfileDefinitionHandler_Handle(t *testing.T) {
 		{
 			name:   "malformed site",
 			tenant: false,
-			detail: false,
 			status: http.StatusBadRequest,
 			calls:  0,
 			prepare: func(t *testing.T, f *profileQueryFixture) {
@@ -812,7 +772,6 @@ func TestGetVPCRoutingProfileDefinitionHandler_Handle(t *testing.T) {
 		{
 			name:   "absent site",
 			tenant: false,
-			detail: false,
 			status: http.StatusBadRequest,
 			calls:  0,
 			prepare: func(t *testing.T, f *profileQueryFixture) {
@@ -822,7 +781,6 @@ func TestGetVPCRoutingProfileDefinitionHandler_Handle(t *testing.T) {
 		{
 			name:   "unknown filter",
 			tenant: false,
-			detail: false,
 			status: http.StatusBadRequest,
 			calls:  0,
 			prepare: func(t *testing.T, f *profileQueryFixture) {
@@ -832,7 +790,6 @@ func TestGetVPCRoutingProfileDefinitionHandler_Handle(t *testing.T) {
 		{
 			name:   "negative tier",
 			tenant: false,
-			detail: false,
 			status: http.StatusBadRequest,
 			calls:  0,
 			prepare: func(t *testing.T, f *profileQueryFixture) {
@@ -842,7 +799,6 @@ func TestGetVPCRoutingProfileDefinitionHandler_Handle(t *testing.T) {
 		{
 			name:   "overflow tier",
 			tenant: false,
-			detail: false,
 			status: http.StatusBadRequest,
 			calls:  0,
 			prepare: func(t *testing.T, f *profileQueryFixture) {
@@ -852,7 +808,6 @@ func TestGetVPCRoutingProfileDefinitionHandler_Handle(t *testing.T) {
 		{
 			name:   "invalid boolean",
 			tenant: false,
-			detail: false,
 			status: http.StatusBadRequest,
 			calls:  0,
 			prepare: func(t *testing.T, f *profileQueryFixture) {
@@ -862,7 +817,6 @@ func TestGetVPCRoutingProfileDefinitionHandler_Handle(t *testing.T) {
 		{
 			name:   "bad page size",
 			tenant: false,
-			detail: false,
 			status: http.StatusBadRequest,
 			calls:  0,
 			prepare: func(t *testing.T, f *profileQueryFixture) {
@@ -872,7 +826,6 @@ func TestGetVPCRoutingProfileDefinitionHandler_Handle(t *testing.T) {
 		{
 			name:   "unsupported ordering",
 			tenant: false,
-			detail: false,
 			status: http.StatusBadRequest,
 			calls:  0,
 			prepare: func(t *testing.T, f *profileQueryFixture) {
@@ -882,7 +835,6 @@ func TestGetVPCRoutingProfileDefinitionHandler_Handle(t *testing.T) {
 		{
 			name:   "unregistered site",
 			tenant: false,
-			detail: false,
 			status: http.StatusBadRequest,
 			calls:  0,
 			prepare: func(t *testing.T, f *profileQueryFixture) {
@@ -893,7 +845,6 @@ func TestGetVPCRoutingProfileDefinitionHandler_Handle(t *testing.T) {
 		{
 			name:   "native networking required",
 			tenant: false,
-			detail: false,
 			status: http.StatusBadRequest,
 			calls:  0,
 			prepare: func(t *testing.T, f *profileQueryFixture) {
@@ -905,7 +856,6 @@ func TestGetVPCRoutingProfileDefinitionHandler_Handle(t *testing.T) {
 		{
 			name:   "missing tenant on site",
 			tenant: true,
-			detail: false,
 			status: http.StatusNotFound,
 			calls:  1,
 			prepare: func(t *testing.T, f *profileQueryFixture) {
@@ -915,7 +865,6 @@ func TestGetVPCRoutingProfileDefinitionHandler_Handle(t *testing.T) {
 		{
 			name:   "mismatched tenant fails closed",
 			tenant: true,
-			detail: false,
 			status: http.StatusInternalServerError,
 			calls:  1,
 			prepare: func(t *testing.T, f *profileQueryFixture) {
@@ -925,7 +874,6 @@ func TestGetVPCRoutingProfileDefinitionHandler_Handle(t *testing.T) {
 		{
 			name:   "missing default selection fails closed",
 			tenant: true,
-			detail: false,
 			status: http.StatusInternalServerError,
 			calls:  1,
 			prepare: func(t *testing.T, f *profileQueryFixture) {
@@ -935,7 +883,6 @@ func TestGetVPCRoutingProfileDefinitionHandler_Handle(t *testing.T) {
 		{
 			name:   "missing default definition fails closed",
 			tenant: true,
-			detail: false,
 			status: http.StatusInternalServerError,
 			calls:  2,
 			prepare: func(t *testing.T, f *profileQueryFixture) {
@@ -945,7 +892,6 @@ func TestGetVPCRoutingProfileDefinitionHandler_Handle(t *testing.T) {
 		{
 			name:   "missing default config fails closed",
 			tenant: true,
-			detail: false,
 			status: http.StatusInternalServerError,
 			calls:  2,
 			prepare: func(t *testing.T, f *profileQueryFixture) {
@@ -955,7 +901,6 @@ func TestGetVPCRoutingProfileDefinitionHandler_Handle(t *testing.T) {
 		{
 			name:   "name query error propagates",
 			tenant: false,
-			detail: false,
 			status: http.StatusServiceUnavailable,
 			calls:  1,
 			prepare: func(t *testing.T, f *profileQueryFixture) {
@@ -963,19 +908,8 @@ func TestGetVPCRoutingProfileDefinitionHandler_Handle(t *testing.T) {
 			},
 		},
 		{
-			name:   "definition query error propagates",
-			tenant: false,
-			detail: true,
-			status: http.StatusServiceUnavailable,
-			calls:  1,
-			prepare: func(t *testing.T, f *profileQueryFixture) {
-				f.profilesErr = tp.NewNonRetryableApplicationError("Core unavailable", swe.ErrTypeNICoUnavailable, nil)
-			},
-		},
-		{
 			name:   "empty list skips definition RPC",
 			tenant: false,
-			detail: false,
 			status: http.StatusOK,
 			calls:  1,
 			prepare: func(t *testing.T, f *profileQueryFixture) {
@@ -986,7 +920,6 @@ func TestGetVPCRoutingProfileDefinitionHandler_Handle(t *testing.T) {
 		{
 			name:   "page beyond end skips definition RPC",
 			tenant: false,
-			detail: false,
 			status: http.StatusOK,
 			calls:  1,
 			prepare: func(t *testing.T, f *profileQueryFixture) {
@@ -997,7 +930,6 @@ func TestGetVPCRoutingProfileDefinitionHandler_Handle(t *testing.T) {
 		{
 			name:   "sorted descending page fetches only selected definitions",
 			tenant: false,
-			detail: false,
 			status: http.StatusOK,
 			calls:  2,
 			prepare: func(t *testing.T, f *profileQueryFixture) {
@@ -1010,7 +942,6 @@ func TestGetVPCRoutingProfileDefinitionHandler_Handle(t *testing.T) {
 		{
 			name:   "lower tier after discovery cannot leak",
 			tenant: true,
-			detail: false,
 			status: http.StatusConflict,
 			calls:  4,
 			prepare: func(t *testing.T, f *profileQueryFixture) {
@@ -1020,7 +951,6 @@ func TestGetVPCRoutingProfileDefinitionHandler_Handle(t *testing.T) {
 		{
 			name:   "profile removed after discovery fails",
 			tenant: false,
-			detail: false,
 			status: http.StatusConflict,
 			calls:  2,
 			prepare: func(t *testing.T, f *profileQueryFixture) {
@@ -1030,17 +960,134 @@ func TestGetVPCRoutingProfileDefinitionHandler_Handle(t *testing.T) {
 		{
 			name:   "unexpected profile cannot leak",
 			tenant: false,
-			detail: false,
 			status: http.StatusInternalServerError,
 			calls:  2,
 			prepare: func(t *testing.T, f *profileQueryFixture) {
 				f.profiles.Profiles[0].Name = "OTHER"
 			},
 		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newProfileQueryFixture(t, tc.tenant)
+			if tc.prepare != nil {
+				tc.prepare(t, f)
+			}
+			var methods []string
+			var requests []proto.Message
+			var responses []proto.Message
+			var errors []error
+			if tc.tenant {
+				methods = append(methods, corev1.Forge_FindTenant_FullMethodName, corev1.Forge_FindRoutingProfilesByNames_FullMethodName)
+				requests = append(requests, &corev1.FindTenantRequest{TenantOrganizationId: f.tenant.Org}, &corev1.RoutingProfilesByNamesRequest{Names: []string{"EXTERNAL"}})
+				responses = append(responses, f.current, f.defaultProfile)
+				errors = append(errors, f.readErr, nil)
+			}
+			methods = append(methods, corev1.Forge_FindRoutingProfileNames_FullMethodName)
+			requests = append(requests, &f.filter)
+			responses = append(responses, &f.names)
+			errors = append(errors, f.namesErr)
+			methods = append(methods, corev1.Forge_FindRoutingProfilesByNames_FullMethodName)
+			requests = append(requests, &corev1.RoutingProfilesByNamesRequest{Names: f.expectedNames})
+			responses = append(responses, f.profiles)
+			errors = append(errors, f.profilesErr)
+			for i := range tc.calls {
+				f.expectProxy(t, methods[i], responses[i], errors[i])
+			}
+			path := "/org/:orgName/nico/vpc/routing-profile"
+			target := "/org/" + f.org + "/nico/vpc/routing-profile"
+
+			e := echo.New()
+			h := NewGetAllVPCRoutingProfileDefinitionHandler(f.db, f.scp)
+			e.GET(path, h.Handle, func(next echo.HandlerFunc) echo.HandlerFunc {
+				return func(c echo.Context) error {
+					c.Set("user", f.user)
+					return next(c)
+				}
+			})
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, target+"?"+f.query.Encode(), nil))
+			require.Equal(t, tc.status, rec.Code, rec.Body.String())
+			if tc.message != "" {
+				assert.Contains(t, rec.Body.String(), tc.message)
+			}
+			require.Len(t, f.calls, tc.calls)
+			f.client.AssertExpectations(t)
+			for i, call := range f.calls {
+				got := requests[i].ProtoReflect().New().Interface()
+				require.NoError(t, protojson.Unmarshal(call.RequestJSON, got))
+				assert.True(t, proto.Equal(requests[i], got), "call %d: want %v, got %v", i, requests[i], got)
+				assert.Empty(t, call.EncryptedSecrets)
+			}
+			if tc.status == http.StatusOK {
+				var payload any
+				require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &payload))
+				items := payload.([]any)
+				require.Len(t, items, len(f.expectedNames))
+				for i, name := range f.expectedNames {
+					item := items[i].(map[string]any)
+					assert.Equal(t, name, item["name"])
+					assert.Contains(t, item["config"], "accessTier")
+				}
+				var page pagination.PageResponse
+				require.NoError(t, json.Unmarshal([]byte(rec.Header().Get(pagination.ResponseHeaderName)), &page))
+				assert.Equal(t, len(f.names.Names), page.Total)
+				if f.query.Get("pageNumber") == "2" {
+					assert.Equal(t, 2, page.PageNumber)
+				} else {
+					assert.Equal(t, 1, page.PageNumber)
+				}
+				if f.query.Get("pageSize") == "1" {
+					assert.Equal(t, 1, page.PageSize)
+					assert.Equal(t, "NAME_DESC", *page.OrderBy)
+				} else {
+					assert.Equal(t, 20, page.PageSize)
+					assert.Equal(t, "NAME_ASC", *page.OrderBy)
+				}
+			}
+		})
+	}
+}
+
+func TestGetVPCRoutingProfileDefinitionHandler_Handle(t *testing.T) {
+	cases := []struct {
+		name    string
+		tenant  bool
+		prepare func(*testing.T, *profileQueryFixture)
+		status  int
+		calls   int
+		message string
+	}{
+		{
+			name:   "provider viewer can read",
+			tenant: false,
+			status: http.StatusOK,
+			calls:  1,
+			prepare: func(t *testing.T, f *profileQueryFixture) {
+				f.user = common.TestBuildUser(t, f.db, uuid.NewString(), f.org, []string{authz.ProviderViewerRole})
+			},
+		},
+		{
+			name:   "unprivileged tenant denied detail",
+			tenant: true,
+			status: http.StatusForbidden,
+			calls:  0,
+			prepare: func(t *testing.T, f *profileQueryFixture) {
+				f.setPrivilege(t, false)
+			},
+		},
+		{
+			name:   "definition query error propagates",
+			tenant: false,
+			status: http.StatusServiceUnavailable,
+			calls:  1,
+			prepare: func(t *testing.T, f *profileQueryFixture) {
+				f.profilesErr = tp.NewNonRetryableApplicationError("Core unavailable", swe.ErrTypeNICoUnavailable, nil)
+			},
+		},
 		{
 			name:   "tenant reads equal tier",
 			tenant: true,
-			detail: true,
 			status: http.StatusOK,
 			calls:  3,
 			prepare: func(t *testing.T, f *profileQueryFixture) {
@@ -1050,14 +1097,12 @@ func TestGetVPCRoutingProfileDefinitionHandler_Handle(t *testing.T) {
 		{
 			name:   "tenant reads higher tier",
 			tenant: true,
-			detail: true,
 			status: http.StatusOK,
 			calls:  3,
 		},
 		{
 			name:    "tenant lower tier denied",
 			tenant:  true,
-			detail:  true,
 			status:  http.StatusForbidden,
 			calls:   3,
 			message: "access tier lower",
@@ -1068,7 +1113,6 @@ func TestGetVPCRoutingProfileDefinitionHandler_Handle(t *testing.T) {
 		{
 			name:   "tenant unset target tier is zero",
 			tenant: true,
-			detail: true,
 			status: http.StatusForbidden,
 			calls:  3,
 			prepare: func(t *testing.T, f *profileQueryFixture) {
@@ -1078,7 +1122,6 @@ func TestGetVPCRoutingProfileDefinitionHandler_Handle(t *testing.T) {
 		{
 			name:   "provider can read tier zero",
 			tenant: false,
-			detail: true,
 			status: http.StatusOK,
 			calls:  1,
 			prepare: func(t *testing.T, f *profileQueryFixture) {
@@ -1088,7 +1131,6 @@ func TestGetVPCRoutingProfileDefinitionHandler_Handle(t *testing.T) {
 		{
 			name:   "exact escaped profile name",
 			tenant: false,
-			detail: true,
 			status: http.StatusOK,
 			calls:  1,
 			prepare: func(t *testing.T, f *profileQueryFixture) {
@@ -1099,7 +1141,6 @@ func TestGetVPCRoutingProfileDefinitionHandler_Handle(t *testing.T) {
 		},
 		{
 			name:   "invalid UTF-8 profile name is a client error",
-			detail: true,
 			status: http.StatusBadRequest,
 			prepare: func(t *testing.T, f *profileQueryFixture) {
 				f.profileName = string([]byte{0xff})
@@ -1108,7 +1149,6 @@ func TestGetVPCRoutingProfileDefinitionHandler_Handle(t *testing.T) {
 		{
 			name:   "missing named profile",
 			tenant: false,
-			detail: true,
 			status: http.StatusNotFound,
 			calls:  1,
 			prepare: func(t *testing.T, f *profileQueryFixture) {
@@ -1118,7 +1158,6 @@ func TestGetVPCRoutingProfileDefinitionHandler_Handle(t *testing.T) {
 		{
 			name:   "detail rejects list filters",
 			tenant: false,
-			detail: true,
 			status: http.StatusBadRequest,
 			calls:  0,
 			prepare: func(t *testing.T, f *profileQueryFixture) {
@@ -1142,12 +1181,7 @@ func TestGetVPCRoutingProfileDefinitionHandler_Handle(t *testing.T) {
 				responses = append(responses, f.current, f.defaultProfile)
 				errors = append(errors, f.readErr, nil)
 			}
-			if !tc.detail {
-				methods = append(methods, corev1.Forge_FindRoutingProfileNames_FullMethodName)
-				requests = append(requests, &f.filter)
-				responses = append(responses, &f.names)
-				errors = append(errors, f.namesErr)
-			}
+
 			methods = append(methods, corev1.Forge_FindRoutingProfilesByNames_FullMethodName)
 			requests = append(requests, &corev1.RoutingProfilesByNamesRequest{Names: f.expectedNames})
 			responses = append(responses, f.profiles)
@@ -1157,10 +1191,8 @@ func TestGetVPCRoutingProfileDefinitionHandler_Handle(t *testing.T) {
 			}
 			path := "/org/:orgName/nico/vpc/routing-profile"
 			target := "/org/" + f.org + "/nico/vpc/routing-profile"
-			if tc.detail {
-				path += "/:profileName"
-				target += "/" + url.PathEscape(f.profileName)
-			}
+			path += "/:profileName"
+			target += "/" + url.PathEscape(f.profileName)
 			e := echo.New()
 			h := NewGetVPCRoutingProfileDefinitionHandler(f.db, f.scp)
 			e.GET(path, h.Handle, func(next echo.HandlerFunc) echo.HandlerFunc {
@@ -1186,35 +1218,10 @@ func TestGetVPCRoutingProfileDefinitionHandler_Handle(t *testing.T) {
 			if tc.status == http.StatusOK {
 				var payload any
 				require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &payload))
-				if tc.detail {
-					item := payload.(map[string]any)
-					assert.Equal(t, f.profileName, item["name"])
-					assert.Contains(t, item["config"], "routeTargetImports")
-					assert.Empty(t, rec.Header().Get(pagination.ResponseHeaderName))
-				} else {
-					items := payload.([]any)
-					require.Len(t, items, len(f.expectedNames))
-					for i, name := range f.expectedNames {
-						item := items[i].(map[string]any)
-						assert.Equal(t, name, item["name"])
-						assert.Contains(t, item["config"], "accessTier")
-					}
-					var page pagination.PageResponse
-					require.NoError(t, json.Unmarshal([]byte(rec.Header().Get(pagination.ResponseHeaderName)), &page))
-					assert.Equal(t, len(f.names.Names), page.Total)
-					if f.query.Get("pageNumber") == "2" {
-						assert.Equal(t, 2, page.PageNumber)
-					} else {
-						assert.Equal(t, 1, page.PageNumber)
-					}
-					if f.query.Get("pageSize") == "1" {
-						assert.Equal(t, 1, page.PageSize)
-						assert.Equal(t, "NAME_DESC", *page.OrderBy)
-					} else {
-						assert.Equal(t, 20, page.PageSize)
-						assert.Equal(t, "NAME_ASC", *page.OrderBy)
-					}
-				}
+				item := payload.(map[string]any)
+				assert.Equal(t, f.profileName, item["name"])
+				assert.Contains(t, item["config"], "routeTargetImports")
+				assert.Empty(t, rec.Header().Get(pagination.ResponseHeaderName))
 			}
 		})
 	}

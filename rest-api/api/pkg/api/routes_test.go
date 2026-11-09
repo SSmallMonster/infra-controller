@@ -202,6 +202,17 @@ func TestNewAPIRoutes(t *testing.T) {
 			profileDefinitionsPath := "/org/:orgName/" + cfg.GetAPIName() + "/vpc/routing-profile"
 			assertRouteExists(t, got, http.MethodGet, profileDefinitionsPath)
 			assertRouteExists(t, got, http.MethodGet, profileDefinitionsPath+"/:profileName")
+			for _, route := range got {
+				if route.Method != http.MethodGet {
+					continue
+				}
+				switch route.Path {
+				case profileDefinitionsPath:
+					assert.IsType(t, apiHandler.GetAllVPCRoutingProfileDefinitionHandler{}, route.Handler)
+				case profileDefinitionsPath + "/:profileName":
+					assert.IsType(t, apiHandler.GetVPCRoutingProfileDefinitionHandler{}, route.Handler)
+				}
+			}
 			assertRouteBefore(t, got, http.MethodGet, profileDefinitionsPath, http.MethodGet, "/org/:orgName/"+cfg.GetAPIName()+"/vpc/:id")
 			vpcRoutingProfilePath := "/org/:orgName/" + cfg.GetAPIName() + "/vpc/:id/routing-profile"
 			assertRouteBefore(t, got, http.MethodGet, profileDefinitionsPath+"/:profileName", http.MethodGet, vpcRoutingProfilePath)

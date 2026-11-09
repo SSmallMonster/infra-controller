@@ -250,7 +250,7 @@ func NewAPIRoutes(dbSession *cdb.Session, tc tClient.Client, tnc tClient.Namespa
 		{
 			Path:    apiPathPrefix + "/vpc/routing-profile",
 			Method:  http.MethodGet,
-			Handler: apiHandler.NewGetVPCRoutingProfileDefinitionHandler(dbSession, scp),
+			Handler: apiHandler.NewGetAllVPCRoutingProfileDefinitionHandler(dbSession, scp),
 		},
 		{
 			Path:    apiPathPrefix + "/vpc/routing-profile/:profileName",
