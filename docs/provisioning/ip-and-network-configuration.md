@@ -825,3 +825,44 @@ When every item is checked, proceed to [Ingesting Hosts](ingesting-hosts.md).
 - [Reference Installation](../getting-started/installation-options/reference-install.md) — pointers to the manual, manifest-level install and troubleshooting references.
 - [Ingesting Hosts](ingesting-hosts.md) — `expected_machines.json` schema and upload commands.
 - [DNS Service Endpoints](../configuration/dns-service-endpoints.md) - canonical reference for NICo service hostnames, ports, and hardcoded-vs-configurable status.
+
+## IPv4 DHCP allocation intervals
+
+Site segments of type Admin, Underlay, or HostInband can have an inclusive DHCP
+interval independent of their subnet CIDR. The segment
+must have exactly one IPv4 prefix; an additional IPv6 prefix is unaffected.
+For example, `192.0.2.100` through `192.0.2.200` limits new host-interface
+allocations to that interval without changing `192.0.2.0/24`.
+
+Explicit endpoints replace `reserve_first` for allocation and free-address
+accounting. Both endpoints must be usable IPv4 addresses in that prefix, ordered
+start before or equal to end. The interval must exclude the gateway and SVI.
+Owned addresses, including fixed reservations, remain unavailable to other
+clients. Explicit fixed addresses may be outside the DHCP interval.
+
+The Core RPCs expose this policy:
+
+| RPC | Contract |
+| --- | --- |
+| `FindNetworkSegmentDhcpRanges` | Takes `NetworkSegmentIdList`; returns persisted policies for those segments. An empty list probes support. Missing policy means default allocation and revision `0`. |
+| `SetNetworkSegmentDhcpRange` | Takes `segment_id`, optional `range` with `start` and `end`, and `if_revision`. Sets or clears the policy without recreating the subnet. |
+| `CreateNetworkSegmentWithDhcpRange` | Takes `segment` with the normal creation request and required `range`. Creates both atomically so no unrestricted allocation window exists. |
+
+A successful write increments the policy revision, including when clearing it.
+Clearing omits `range`, restores `reserve_first`, and preserves existing leases.
+Stale writes fail with `FailedPrecondition`. A requested interval that excludes
+existing IPv4 DHCP allocations also fails with `FailedPrecondition`, listing up
+to 20 addresses; it never reclaims leases or renumbers interfaces. An exhausted
+interval returns `ResourceExhausted` from the allocator.
+
+Policies persist in `network_dhcp_ranges`, keyed by network prefix. They are
+managed through these RPCs rather than the `[pools.*]` loopback settings or
+`[networks.*]` TOML. Both reads and writes require an admin CLI or Site Agent
+identity. Writes use the segment advisory lock shared with the allocator; new
+allocations read current bounds inside that lock rather than a cached policy.
+
+Deploy the database migration and matching Core image on every replica before
+enabling an interval. Older Core replicas ignore the policy and must not serve
+allocation requests while it is enabled. Clear intervals before rolling back to
+an older image and assess the restored subnet-wide allocation policy. The
+additive migration does not change existing allocation rows or set ranges.

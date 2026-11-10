@@ -605,6 +605,27 @@ impl Forge for Api {
         crate::handlers::network_segment::create(self, request).await
     }
 
+    async fn find_network_segment_dhcp_ranges(
+        &self,
+        request: Request<rpc::NetworkSegmentIdList>,
+    ) -> Result<Response<rpc::NetworkSegmentDhcpRangeList>, Status> {
+        crate::handlers::network_segment::find_dhcp_ranges(self, request).await
+    }
+
+    async fn set_network_segment_dhcp_range(
+        &self,
+        request: Request<rpc::NetworkSegmentDhcpRangeUpdateRequest>,
+    ) -> Result<Response<rpc::NetworkSegmentDhcpRange>, Status> {
+        crate::handlers::network_segment::set_dhcp_range(self, request).await
+    }
+
+    async fn create_network_segment_with_dhcp_range(
+        &self,
+        request: Request<rpc::NetworkSegmentWithDhcpRangeCreationRequest>,
+    ) -> Result<Response<rpc::NetworkSegment>, Status> {
+        crate::handlers::network_segment::create_with_dhcp_range(self, request).await
+    }
+
     async fn attach_network_segment_to_vpc(
         &self,
         request: Request<rpc::AttachNetworkSegmentToVpcRequest>,

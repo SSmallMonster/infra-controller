@@ -120,8 +120,32 @@ pub(crate) async fn create(
 ) -> Result<Response<rpc::NetworkSegment>, Status> {
     crate::api::log_request_data(&request);
 
-    let request = request.into_inner();
+    create_inner(api, request.into_inner(), None).await
+}
 
+pub(crate) async fn create_with_dhcp_range(
+    api: &Api,
+    request: Request<rpc::NetworkSegmentWithDhcpRangeCreationRequest>,
+) -> Result<Response<rpc::NetworkSegment>, Status> {
+    log_request_data(&request);
+    let request = request.into_inner();
+    let range =
+        parse_dhcp_range(request.range)?.ok_or_else(|| CarbideError::MissingArgument("range"))?;
+    create_inner(
+        api,
+        request
+            .segment
+            .ok_or_else(|| CarbideError::MissingArgument("segment"))?,
+        Some(range),
+    )
+    .await
+}
+
+async fn create_inner(
+    api: &Api,
+    request: rpc::NetworkSegmentCreationRequest,
+    dhcp_range: Option<(std::net::IpAddr, std::net::IpAddr)>,
+) -> Result<Response<rpc::NetworkSegment>, Status> {
     let new_network_segment = NewNetworkSegment::try_from(request)?;
 
     // Only actual ::Tenant segments need to be contained within site
@@ -194,6 +218,9 @@ pub(crate) async fn create(
     }
 
     let network_segment = save(api, &mut txn, new_network_segment, false, allocate_svi_ip).await?;
+    if let Some(range) = dhcp_range {
+        db::network_dhcp_range::set(txn.as_mut(), &network_segment, Some(range), 0).await?;
+    }
 
     txn.commit().await?;
 
@@ -587,4 +614,85 @@ async fn allocate_vlan_id(
             Err(err.into())
         }
     }
+}
+
+fn parse_dhcp_range(
+    range: Option<rpc::DhcpAddressRange>,
+) -> Result<Option<(std::net::IpAddr, std::net::IpAddr)>, CarbideError> {
+    range
+        .map(|range| {
+            let start = range.start.parse().map_err(|_| {
+                CarbideError::InvalidArgument("DHCP pool: invalid start address".into())
+            })?;
+            let end = range.end.parse().map_err(|_| {
+                CarbideError::InvalidArgument("DHCP pool: invalid end address".into())
+            })?;
+            Ok((start, end))
+        })
+        .transpose()
+}
+
+fn dhcp_range_response(range: db::network_dhcp_range::DhcpRange) -> rpc::NetworkSegmentDhcpRange {
+    rpc::NetworkSegmentDhcpRange {
+        segment_id: Some(range.segment_id),
+        prefix_id: Some(range.prefix_id),
+        prefix: range.prefix.to_string(),
+        revision: range.revision,
+        range: range
+            .range_start
+            .zip(range.range_end)
+            .map(|(start, end)| rpc::DhcpAddressRange {
+                start: start.to_string(),
+                end: end.to_string(),
+            }),
+    }
+}
+
+pub(crate) async fn find_dhcp_ranges(
+    api: &Api,
+    request: Request<rpc::NetworkSegmentIdList>,
+) -> Result<Response<rpc::NetworkSegmentDhcpRangeList>, Status> {
+    log_request_data(&request);
+    let ids = request.into_inner().network_segments_ids;
+    if ids.len() > api.runtime_config.max_find_by_ids as usize {
+        return Err(CarbideError::InvalidArgument("too many network segment IDs".into()).into());
+    }
+    let mut txn = api.txn_begin().await?;
+    let ranges = db::network_dhcp_range::find(&mut txn, &ids).await?;
+    txn.commit().await?;
+    Ok(Response::new(rpc::NetworkSegmentDhcpRangeList {
+        ranges: ranges.into_iter().map(dhcp_range_response).collect(),
+    }))
+}
+
+pub(crate) async fn set_dhcp_range(
+    api: &Api,
+    request: Request<rpc::NetworkSegmentDhcpRangeUpdateRequest>,
+) -> Result<Response<rpc::NetworkSegmentDhcpRange>, Status> {
+    log_request_data(&request);
+    let request = request.into_inner();
+    let id = request
+        .segment_id
+        .ok_or_else(|| CarbideError::MissingArgument("segment_id"))?;
+    let range = parse_dhcp_range(request.range)?;
+    let mut txn = api.txn_begin().await?;
+    // Same lock namespace/order as DHCP writers: wait for prior allocations,
+    // then validate and change bounds before any new allocation can proceed.
+    db::machine_interface::lock_network_segments_exclusive(txn.as_mut(), &[id]).await?;
+    let segment = db::network_segment::find_by(
+        &mut txn,
+        ObjectColumnFilter::One(network_segment::IdColumn, &id),
+        NetworkSegmentSearchConfig::default(),
+    )
+    .await?
+    .into_iter()
+    .next()
+    .ok_or_else(|| CarbideError::NotFoundError {
+        kind: "network segment",
+        id: id.to_string(),
+    })?;
+    let result =
+        db::network_dhcp_range::set(txn.as_mut(), &segment, range, request.if_revision).await?;
+    txn.commit().await?;
+    Ok(Response::new(dhcp_range_response(result)))
 }

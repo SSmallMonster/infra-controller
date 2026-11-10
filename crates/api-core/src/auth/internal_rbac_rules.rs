@@ -123,6 +123,15 @@ impl InternalRBACRules {
             "CreateNetworkSegment",
             vec![ForgeAdminCLI, Machineatron, SiteAgent],
         );
+        x.perm(
+            "FindNetworkSegmentDhcpRanges",
+            vec![ForgeAdminCLI, SiteAgent],
+        );
+        x.perm("SetNetworkSegmentDhcpRange", vec![ForgeAdminCLI, SiteAgent]);
+        x.perm(
+            "CreateNetworkSegmentWithDhcpRange",
+            vec![ForgeAdminCLI, SiteAgent],
+        );
         x.perm("AttachNetworkSegmentToVpc", vec![ForgeAdminCLI]);
         x.perm(
             "DeleteNetworkSegment",

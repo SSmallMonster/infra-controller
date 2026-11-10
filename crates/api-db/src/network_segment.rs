@@ -757,7 +757,8 @@ where
             .used_ips(&mut *conn)
             .await?;
             for prefix in &mut record.prefixes {
-                prefix.num_free_ips = Some(num_free_host_addresses(prefix, &used_ips)?);
+                let range = crate::network_dhcp_range::bounds(&mut *conn, prefix.id).await?;
+                prefix.num_free_ips = Some(num_free_host_addresses(prefix, &used_ips, range)?);
             }
             continue;
         }

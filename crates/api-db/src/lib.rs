@@ -76,6 +76,7 @@ pub mod managed_host;
 pub mod measured_boot;
 pub mod migrations;
 pub mod network_devices;
+pub mod network_dhcp_range;
 pub mod network_prefix;
 pub mod network_security_group;
 pub mod network_segment;

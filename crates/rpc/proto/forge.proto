@@ -126,6 +126,15 @@ service Forge {
   rpc FindNetworkSegmentIds(NetworkSegmentSearchFilter) returns (NetworkSegmentIdList);
   rpc FindNetworkSegmentsByIds(NetworkSegmentsByIdsRequest) returns (NetworkSegmentList);
   rpc CreateNetworkSegment(NetworkSegmentCreationRequest) returns (NetworkSegment);
+  // Read DHCP range support/configuration. An empty ID list is a capability probe.
+  rpc FindNetworkSegmentDhcpRanges(NetworkSegmentIdList) returns (NetworkSegmentDhcpRangeList);
+  // Set or clear a site's IPv4 dynamic allocation range without recreating it.
+  // Updates serialize with allocation. Existing dynamic addresses outside a
+  // requested range cause FailedPrecondition (up to 20 addresses in the error);
+  // they are never reclaimed. Clearing restores reserve_first and retains leases.
+  rpc SetNetworkSegmentDhcpRange(NetworkSegmentDhcpRangeUpdateRequest) returns (NetworkSegmentDhcpRange);
+  // Create the segment and its DHCP range in one transaction.
+  rpc CreateNetworkSegmentWithDhcpRange(NetworkSegmentWithDhcpRangeCreationRequest) returns (NetworkSegment);
   rpc AttachNetworkSegmentToVpc(AttachNetworkSegmentToVpcRequest) returns (NetworkSegment);
   rpc DeleteNetworkSegment(NetworkSegmentDeletionRequest) returns (NetworkSegmentDeletionResult);
   // TODO: This functionality should get integrated into NetworkSegmentSearchFilter
@@ -13410,4 +13419,42 @@ message NamedRoutingProfileConfig {
 message NamedRoutingProfileList {
   repeated NamedRoutingProfile profiles = 1;
 
+}
+
+// Inclusive IPv4 endpoints for Admin, Underlay, or HostInband site segments.
+// Exactly one IPv4 prefix is required; IPv6 is unaffected.
+// Both addresses must be usable in that prefix, ordered start <= end, and the
+// interval cannot contain its gateway or SVI. Explicit bounds replace
+// reserve_first for new host-interface allocations; fixed addresses are exempt.
+message DhcpAddressRange {
+  string start = 1;
+  string end = 2;
+}
+
+// A persisted DHCP policy, independent of fixed allocations and subnet CIDR.
+message NetworkSegmentDhcpRange {
+  common.NetworkSegmentId segment_id = 1;
+  common.NetworkPrefixId prefix_id = 2;
+  string prefix = 3;
+  // Absent means the existing reserve_first allocation policy applies.
+  optional DhcpAddressRange range = 4;
+  // Starts at 1; retained even after clearing to prevent stale writes.
+  int64 revision = 5;
+}
+
+message NetworkSegmentDhcpRangeList {
+  repeated NetworkSegmentDhcpRange ranges = 1;
+}
+
+message NetworkSegmentDhcpRangeUpdateRequest {
+  common.NetworkSegmentId segment_id = 1;
+  // Omit to clear. Existing leases are never removed or renumbered.
+  optional DhcpAddressRange range = 2;
+  // Use 0 when no policy exists. Stale writes fail without applying changes.
+  int64 if_revision = 3;
+}
+
+message NetworkSegmentWithDhcpRangeCreationRequest {
+  NetworkSegmentCreationRequest segment = 1;
+  DhcpAddressRange range = 2;
 }
