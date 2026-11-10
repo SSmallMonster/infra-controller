@@ -267,6 +267,7 @@ impl InternalRBACRules {
         x.perm("ReportScoutFirmwareUpgradeStatus", vec![Scout]);
         x.perm("DiscoverDhcp", vec![Dhcp, Machineatron]);
         x.perm("ExpireDhcpLease", vec![Dhcp, Machineatron]);
+        x.perm("PrepareStaticAddress", vec![ForgeAdminCLI]);
         x.perm("AssignStaticAddress", vec![ForgeAdminCLI]);
         x.perm("RemoveStaticAddress", vec![ForgeAdminCLI]);
         x.perm("FindInterfaceAddresses", vec![ForgeAdminCLI]);

@@ -1120,6 +1120,16 @@ impl Forge for Api {
         crate::handlers::machine::find_machine_health_histories(self, request).await
     }
 
+    async fn prepare_static_address(
+        &self,
+        request: Request<rpc::PrepareStaticAddressRequest>,
+    ) -> Result<Response<()>, Status> {
+        Ok(
+            crate::handlers::machine_interface_address::prepare_static_address(self, request)
+                .await?,
+        )
+    }
+
     async fn assign_static_address(
         &self,
         request: Request<rpc::AssignStaticAddressRequest>,

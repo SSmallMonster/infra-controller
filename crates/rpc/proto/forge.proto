@@ -281,6 +281,8 @@ service Forge {
   rpc DiscoverDhcp(DhcpDiscovery) returns (DhcpRecord);
   rpc ExpireDhcpLease(ExpireDhcpLeaseRequest) returns (ExpireDhcpLeaseResponse);
 
+  // Hold a target while preserving the current contact address. Site-local extension.
+  rpc PrepareStaticAddress(PrepareStaticAddressRequest) returns (google.protobuf.Empty);
   rpc AssignStaticAddress(AssignStaticAddressRequest) returns (AssignStaticAddressResponse);
   rpc RemoveStaticAddress(RemoveStaticAddressRequest) returns (RemoveStaticAddressResponse);
   rpc FindInterfaceAddresses(FindInterfaceAddressesRequest) returns (FindInterfaceAddressesResponse);
@@ -4727,6 +4729,12 @@ message InterfaceDeleteQuery {
 message InterfaceSearchQuery {
   optional common.MachineInterfaceId id = 1;
   optional string ip = 2;
+}
+
+message PrepareStaticAddressRequest {
+  common.MachineInterfaceId interface_id = 1;
+  string ip_address = 2;
+  string current_ip_address = 3;
 }
 
 message AssignStaticAddressRequest {
