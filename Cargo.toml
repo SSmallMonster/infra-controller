@@ -285,3 +285,7 @@ redundant_clone = "warn"
 large_stack_arrays = "warn"
 unused_async = "warn"
 undocumented_unsafe_blocks = "deny"
+
+# Local Lenovo BIOS enum compatibility patch, based on libredfish v0.47.25.
+[patch."https://github.com/NVIDIA/libredfish.git"]
+libredfish = { path = "../libredfish" }
