@@ -324,6 +324,15 @@ pub(crate) async fn find_by_nic_firmware_profile(
         .collect()
 }
 
+/// Read the current database clock, rather than the transaction's start time.
+pub async fn database_now(db: impl DbReader<'_>) -> Result<DateTime<Utc>, DatabaseError> {
+    let query = "SELECT clock_timestamp()";
+    sqlx::query_scalar(query)
+        .fetch_one(db)
+        .await
+        .map_err(|error| DatabaseError::query(query, error))
+}
+
 /// Lock the machine row before reading its mutable request state. A separate
 /// read after this query sees changes committed by the previous lock holder.
 pub async fn lock_by_id_for_update(

@@ -13809,7 +13809,9 @@ pub async fn handler_host_power_control_with_location(
 ) -> Result<(), StateHandlerError> {
     if matches!(
         action,
-        ResetType::On | ResetType::ForceOn | ResetType::ForceRestart | ResetType::GracefulRestart
+        SystemPowerControl::On
+            | SystemPowerControl::ForceRestart
+            | SystemPowerControl::GracefulRestart
     ) {
         if let Some(purpose) = crate::virtual_media::network_boot_purpose(managedhost_snapshot) {
             if crate::virtual_media::managed_boot_dispatched(
