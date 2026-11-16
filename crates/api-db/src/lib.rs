@@ -50,6 +50,7 @@ pub mod extension_service;
 pub mod hardware_class_attesters;
 pub mod health_history;
 pub mod health_report;
+pub mod host_boot;
 pub mod host_firmware_config;
 pub mod host_machine_update;
 pub mod host_naming;
