@@ -24,3 +24,8 @@ rm -f /boot/System.map-* /boot/config-* /boot/vmlinu* /lib/modules/*/vmlinuz /bo
 
 # Make sure /tmp is empty
 rm -rf /tmp/*
+
+# The site-local repository does not exist when building the first Scout.
+# Install its runtime configuration after all build-time APT operations.
+mkdir -p /etc/apt/sources.list.d
+printf '%s\n' 'deb [trusted=yes] http://carbide-pxe.forge/public/blobs/internal/apt/ focal main' >/etc/apt/sources.list.d/forge.list
