@@ -7223,6 +7223,7 @@ dependencies = [
 [[package]]
 name = "libredfish"
 version = "0.0.0"
+source = "git+https://github.com/SSmallMonster/libredfish.git?rev=b6b4fff7277276bb4d0724e7dd4dca9cea2abbd1#b6b4fff7277276bb4d0724e7dd4dca9cea2abbd1"
 dependencies = [
  "chrono",
  "clap",
