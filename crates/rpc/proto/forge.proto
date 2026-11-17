@@ -143,6 +143,16 @@ service Forge {
   // together; a zone is created only for zone-boundary-aligned prefixes.
   // It does not configure site routing, router advertisements or DHCP relays.
   rpc AddNetworkSegmentPrefix(AddNetworkSegmentPrefixRequest) returns (NetworkSegment);
+
+  // Read DHCP range support/configuration. An empty ID list is a capability probe.
+  rpc FindNetworkSegmentDhcpRanges(NetworkSegmentIdList) returns (NetworkSegmentDhcpRangeList);
+  // Set or clear a site's IPv4 dynamic allocation range without recreating it.
+  // Updates serialize with allocation. Existing dynamic addresses outside a
+  // requested range cause FailedPrecondition (up to 20 addresses in the error);
+  // they are never reclaimed. Clearing restores reserve_first and retains leases.
+  rpc SetNetworkSegmentDhcpRange(NetworkSegmentDhcpRangeUpdateRequest) returns (NetworkSegmentDhcpRange);
+  // Create the segment and its DHCP range in one transaction.
+  rpc CreateNetworkSegmentWithDhcpRange(NetworkSegmentWithDhcpRangeCreationRequest) returns (NetworkSegment);
   rpc AttachNetworkSegmentToVpc(AttachNetworkSegmentToVpcRequest) returns (NetworkSegment);
   rpc DeleteNetworkSegment(NetworkSegmentDeletionRequest) returns (NetworkSegmentDeletionResult);
   // TODO: This functionality should get integrated into NetworkSegmentSearchFilter
@@ -298,6 +308,8 @@ service Forge {
   rpc DiscoverDhcp(DhcpDiscovery) returns (DhcpRecord);
   rpc ExpireDhcpLease(ExpireDhcpLeaseRequest) returns (ExpireDhcpLeaseResponse);
 
+  // Hold a target while preserving the current contact address. Site-local extension.
+  rpc PrepareStaticAddress(PrepareStaticAddressRequest) returns (google.protobuf.Empty);
   rpc AssignStaticAddress(AssignStaticAddressRequest) returns (AssignStaticAddressResponse);
   rpc RemoveStaticAddress(RemoveStaticAddressRequest) returns (RemoveStaticAddressResponse);
   rpc FindInterfaceAddresses(FindInterfaceAddressesRequest) returns (FindInterfaceAddressesResponse);
@@ -543,6 +555,22 @@ service Forge {
   rpc GetMachineBootOverride(common.MachineInterfaceId) returns (MachineBootOverride);
   rpc SetMachineBootOverride(MachineBootOverride) returns (google.protobuf.Empty);
   rpc ClearMachineBootOverride(common.MachineInterfaceId) returns (google.protobuf.Empty);
+
+  // Opt in one registered host to Core-owned virtual-media boot. No request
+  // leaves the host's default native PXE behavior unchanged. Idempotent for
+  // an identical generation; replacement requires completed media cleanup.
+  rpc SetHostBootIntent(SetHostBootIntentRequest) returns (HostBootStatus);
+  // Read the frozen artifact, current attempt and owned-media cleanup state.
+  rpc GetHostBootIntent(GetHostBootIntentRequest) returns (HostBootStatus);
+  // Accept evidence only for the current generation AND current boot nonce.
+  rpc AcknowledgeHostBoot(AcknowledgeHostBootRequest) returns (HostBootStatus);
+  // Stop future boot actions, then remove only this request's owned media.
+  rpc CancelHostBoot(CancelHostBootRequest) returns (HostBootStatus);
+  // Deliberately restore native PXE only after owned-media cleanup is proven.
+  // Cancellation alone never releases policy ownership.
+  rpc ReleaseHostBootPolicy(CancelHostBootRequest) returns (google.protobuf.Empty);
+
+
 
   // Gather one machine's boot-interface view from every store that records it
   // (owned interface rows, predictions, the explored endpoint default, and the
@@ -4908,6 +4936,12 @@ message InterfaceDeleteQuery {
 message InterfaceSearchQuery {
   optional common.MachineInterfaceId id = 1;
   optional string ip = 2;
+}
+
+message PrepareStaticAddressRequest {
+  common.MachineInterfaceId interface_id = 1;
+  string ip_address = 2;
+  string current_ip_address = 3;
 }
 
 message AssignStaticAddressRequest {
@@ -13955,4 +13989,136 @@ message MachineStateList {
   // Existing requested machines, sorted by ID, including DPUs without a host
   // or loopback IP. Missing IDs are omitted.
   repeated MachineStateSummary machines = 1;
+}
+
+// Inclusive IPv4 endpoints for Admin, Underlay, or HostInband site segments.
+// Exactly one IPv4 prefix is required; IPv6 is unaffected.
+// Both addresses must be usable in that prefix, ordered start <= end, and the
+// interval cannot contain its gateway or SVI. Explicit bounds replace
+// reserve_first for new host-interface allocations; fixed addresses are exempt.
+message DhcpAddressRange {
+  string start = 1;
+  string end = 2;
+}
+
+// A persisted DHCP policy, independent of fixed allocations and subnet CIDR.
+message NetworkSegmentDhcpRange {
+  common.NetworkSegmentId segment_id = 1;
+  common.NetworkPrefixId prefix_id = 2;
+  string prefix = 3;
+  // Absent means the existing reserve_first allocation policy applies.
+  optional DhcpAddressRange range = 4;
+  // Starts at 1; retained even after clearing to prevent stale writes.
+  int64 revision = 5;
+}
+
+message NetworkSegmentDhcpRangeList {
+  repeated NetworkSegmentDhcpRange ranges = 1;
+}
+
+message NetworkSegmentDhcpRangeUpdateRequest {
+  common.NetworkSegmentId segment_id = 1;
+  // Omit to clear. Existing leases are never removed or renumbered.
+  optional DhcpAddressRange range = 2;
+  // Use 0 when no policy exists. Stale writes fail without applying changes.
+  int64 if_revision = 3;
+}
+
+message NetworkSegmentWithDhcpRangeCreationRequest {
+  NetworkSegmentCreationRequest segment = 1;
+  DhcpAddressRange range = 2;
+}
+
+// Why Core is preparing a host's explicitly requested boot transport.
+enum HostBootPurpose {
+  HOST_BOOT_PURPOSE_UNSPECIFIED = 0;
+  HOST_BOOT_PURPOSE_DISCOVERY = 1;
+  HOST_BOOT_PURPOSE_INSTALLATION = 2;
+  HOST_BOOT_PURPOSE_CLEANUP = 3;
+  HOST_BOOT_PURPOSE_LOCAL_DISK = 4;
+}
+
+// Persisted external-effect boundary; Resetting never implies a confirmed reset.
+enum HostBootPhase {
+  HOST_BOOT_PHASE_UNSPECIFIED = 0;
+  HOST_BOOT_PHASE_PENDING = 1;
+  HOST_BOOT_PHASE_INSPECTING = 2;
+  HOST_BOOT_PHASE_MOUNTING = 3;
+  HOST_BOOT_PHASE_MOUNTED = 4;
+  HOST_BOOT_PHASE_SETTING_BOOT = 5;
+  HOST_BOOT_PHASE_ARMED = 6;
+  HOST_BOOT_PHASE_RESETTING = 7;
+  HOST_BOOT_PHASE_AWAITING_ACKNOWLEDGEMENT = 8;
+  HOST_BOOT_PHASE_DETACHING = 9;
+  HOST_BOOT_PHASE_COMPLETED = 10;
+  HOST_BOOT_PHASE_CANCELLED = 11;
+  HOST_BOOT_PHASE_FAILED = 12;
+}
+
+// Proof that this attempt no longer depends on the bootstrap medium.
+enum HostBootEvidence {
+  HOST_BOOT_EVIDENCE_UNSPECIFIED = 0;
+  // Sent by the freshly registered Scout with its boot nonce.
+  HOST_BOOT_EVIDENCE_SCOUT_REGISTERED = 1;
+  // A privileged orchestrator has authenticated a matching installer callback
+  // and established that the installer no longer depends on bootstrap media.
+  HOST_BOOT_EVIDENCE_INSTALLER_INDEPENDENT = 2;
+}
+
+message SetHostBootIntentRequest {
+  // Required existing ExpectedMachine UUID. Core does not accept arbitrary BMC paths.
+  common.UUID expected_machine_id = 1;
+  // Required caller-generated UUID. Identical retries return existing progress.
+  string generation = 2;
+  // Required explicit boot operation; Unspecified is rejected.
+  HostBootPurpose purpose = 3;
+  // Immutable absolute HTTP(S) bootstrap ISO URL. Credentials and fragments are
+  // rejected. The BMC must reach it. LocalDisk may omit it to reuse the prior ref.
+  string artifact_url = 4;
+  // Lowercase 64-character hexadecimal SHA-256, frozen with artifact_url.
+  string artifact_sha256 = 5;
+  // Must match an existing Fixed Host interface of ExpectedMachine.
+  string boot_mac_address = 6;
+  // Must equal that interface's configured fixed_ip and the external DHCP lease.
+  string fixed_ip_address = 7;
+  // Required explicit architecture from the selected bootstrap artifact/plan.
+  // This transport supports X86 only; ARM and unknown values are rejected.
+  MachineArchitecture architecture = 8;
+}
+
+message GetHostBootIntentRequest {
+  common.UUID expected_machine_id = 1;
+}
+
+message AcknowledgeHostBootRequest {
+  common.UUID expected_machine_id = 1;
+  string generation = 2;
+  // UUID nonce is regenerated for every boot attempt within one generation.
+  string acknowledgement_token = 3;
+  HostBootEvidence evidence = 4;
+  // Required for Scout evidence and checked against the registered boot MAC.
+  common.MachineId machine_id = 5;
+}
+
+message CancelHostBootRequest {
+  common.UUID expected_machine_id = 1;
+  // Cancellation cannot accidentally affect a later request.
+  string generation = 2;
+}
+
+message HostBootStatus {
+  common.UUID expected_machine_id = 1;
+  string generation = 2;
+  HostBootPurpose purpose = 3;
+  HostBootPhase phase = 4;
+  string artifact_url = 5;
+  string artifact_sha256 = 6;
+  string acknowledgement_token = 7;
+  bool acknowledged = 8;
+  // True only after Core read back owned-media removal and restored boot state.
+  bool cleanup_complete = 9;
+  optional string last_error = 10;
+  optional string owned_media_uri = 11;
+  bool cancelled = 12;
+  int64 revision = 13;
 }

@@ -148,10 +148,11 @@ async fn find_address_owner(
     address: IpAddr,
 ) -> Result<Option<AddressOwner>, DatabaseError> {
     let query = "SELECT mia.interface_id,
-                COALESCE(mi.mac_address, mia.reserved_by_mac) AS mac_address,
-                mi.segment_id, mia.allocation_type
+                COALESCE(mi.mac_address, mia.reserved_by_mac, staged.mac_address) AS mac_address,
+                COALESCE(mi.segment_id, staged.segment_id) AS segment_id, mia.allocation_type
             FROM machine_interface_addresses mia
             LEFT JOIN machine_interfaces mi ON mi.id = mia.interface_id
+            LEFT JOIN machine_interfaces staged ON staged.id = mia.staged_for_interface_id
             WHERE mia.address = $1::inet";
     sqlx::query_as(query)
         .bind(address)
@@ -621,6 +622,52 @@ pub async fn release_reserved(
         .map_err(|e| DatabaseError::query(query, e))
 }
 
+/// Stage a target in the global ownership table. The caller locks the interface
+/// and checks its current address and subnet in the same short transaction.
+/// No expiration: an interrupted external write must not release a live address.
+pub async fn stage_static(
+    txn: &mut PgConnection,
+    interface_id: MachineInterfaceId,
+    address: IpAddr,
+) -> Result<(), DatabaseError> {
+    let query = "INSERT INTO machine_interface_addresses
+        (address, allocation_type, staged_for_interface_id) VALUES ($1::inet, $2, $3)
+        ON CONFLICT DO NOTHING";
+    let inserted = sqlx::query(query)
+        .bind(address)
+        .bind(AllocationType::Static)
+        .bind(interface_id)
+        .execute(&mut *txn)
+        .await
+        .map_err(|e| DatabaseError::query(query, e))?;
+    if inserted.rows_affected() > 0 {
+        return Ok(());
+    }
+    let query = "SELECT EXISTS(SELECT 1 FROM machine_interface_addresses
+        WHERE address = $1::inet AND (interface_id = $2 OR staged_for_interface_id = $2))";
+    let held: bool = sqlx::query_scalar(query)
+        .bind(address)
+        .bind(interface_id)
+        .fetch_one(&mut *txn)
+        .await
+        .map_err(|e| DatabaseError::query(query, e))?;
+    if held {
+        return Ok(());
+    }
+    if let Some(owner) = find_address_owner(&mut *txn, address).await? {
+        return Err(AddressAlreadyInUseError {
+            address,
+            mac_address: owner.mac_address,
+            segment_id: owner.segment_id,
+            interface_id: owner.interface_id,
+        }
+        .into());
+    }
+    Err(DatabaseError::FailedPrecondition(format!(
+        "interface {interface_id} already has a staged target in this address family"
+    )))
+}
+
 /// Assign a static address to an interface. If the interface already
 /// has an address for the same family, the behavior depends on its
 /// allocation type:
@@ -654,6 +701,17 @@ pub async fn assign_static(
         }
         None => AssignStaticResult::Assigned,
     };
+
+    // Consume only this interface's staged target, atomically with replacement.
+    // Other owners remain protected by UNIQUE(address).
+    let query = "DELETE FROM machine_interface_addresses
+        WHERE staged_for_interface_id = $1 AND address = $2::inet";
+    sqlx::query(query)
+        .bind(interface_id)
+        .bind(address)
+        .execute(&mut *txn)
+        .await
+        .map_err(|e| DatabaseError::query(query, e))?;
 
     insert(txn, interface_id, address, AllocationType::Static).await?;
 

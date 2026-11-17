@@ -119,11 +119,13 @@ mod test_explicit_columns;
 #[cfg(test)]
 mod tests;
 
-/// Count unowned addresses eligible for host allocation across the full prefix.
+/// Count unowned host addresses inside the explicit DHCP interval, or the default
+/// prefix interval when no bounds are configured.
 /// Candidate locks held by other transactions do not reduce this snapshot.
 pub(crate) fn num_free_host_addresses(
     prefix: &NetworkPrefix,
     used_ips: &[IpAddr],
+    dhcp_range: Option<(IpAddr, IpAddr)>,
 ) -> DatabaseResult<u128> {
     // Accounting rejects negative stored counts even though IPv4 allocation
     // clamps them to its minimum reservation. Preserve both behaviors here.
@@ -133,7 +135,9 @@ pub(crate) fn num_free_host_addresses(
             prefix.id, prefix.num_reserved
         )));
     }
-    Ok(host_address_candidates::HostAddressCandidates::new(prefix)?.num_free(used_ips))
+    Ok(host_address_candidates::HostAddressCandidates::new(prefix)?
+        .with_dhcp_range(dhcp_range)
+        .num_free(used_ips))
 }
 
 #[derive(Clone, Copy)]
@@ -2486,7 +2490,9 @@ async fn allocate_next_ip_with_retry(
     segment: &NetworkSegment,
     prefix: &NetworkPrefix,
 ) -> DatabaseResult<IpAddr> {
-    let mut selector = host_address_candidates::HostAddressCandidates::new(prefix)?;
+    let range = crate::network_dhcp_range::bounds(txn.as_mut(), prefix.id).await?;
+    let mut selector =
+        host_address_candidates::HostAddressCandidates::new(prefix)?.with_dhcp_range(range);
     for scan in 0..HOST_CANDIDATE_MAX_SCANS {
         let candidates = if let Some((first, last)) = selector.range() {
             // Ownership is global, including reservations parked without an
@@ -2532,7 +2538,7 @@ async fn allocate_next_ip_with_retry(
                 return Err(DatabaseError::TryAgain);
             }
             return Err(DatabaseError::ResourceExhausted(format!(
-                "No IP addresses left in prefix {}",
+                "DHCP address pool exhausted in prefix {}",
                 prefix.prefix
             )));
         };

@@ -77,6 +77,15 @@ impl<'a> HostAddressCandidates<'a> {
         })
     }
 
+    /// Explicit DHCP bounds replace reserve_first; the network CIDR stays unchanged.
+    pub(super) fn with_dhcp_range(mut self, range: Option<(IpAddr, IpAddr)>) -> Self {
+        if let Some((start, end)) = range {
+            self.first = Some(address_number(start));
+            self.last = address_number(end);
+        }
+        self
+    }
+
     pub(super) fn range(&self) -> Option<(IpAddr, IpAddr)> {
         self.first
             .filter(|first| *first <= self.last)
@@ -321,7 +330,7 @@ mod tests {
                     .iter()
                     .map(|address| address.parse().unwrap())
                     .collect::<Vec<_>>();
-                super::super::num_free_host_addresses(&prefix, &used_ips).map_err(|error| {
+                super::super::num_free_host_addresses(&prefix, &used_ips, None).map_err(|error| {
                     assert!(
                         matches!(
                             &error,

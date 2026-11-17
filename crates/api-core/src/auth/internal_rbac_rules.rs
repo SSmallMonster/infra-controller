@@ -123,6 +123,15 @@ impl InternalRBACRules {
             "CreateNetworkSegment",
             vec![ForgeAdminCLI, Machineatron, SiteAgent],
         );
+        x.perm(
+            "FindNetworkSegmentDhcpRanges",
+            vec![ForgeAdminCLI, SiteAgent],
+        );
+        x.perm("SetNetworkSegmentDhcpRange", vec![ForgeAdminCLI, SiteAgent]);
+        x.perm(
+            "CreateNetworkSegmentWithDhcpRange",
+            vec![ForgeAdminCLI, SiteAgent],
+        );
         x.perm("AttachNetworkSegmentToVpc", vec![ForgeAdminCLI]);
         x.perm("AddNetworkSegmentPrefix", vec![ForgeAdminCLI]);
         x.perm(
@@ -268,6 +277,7 @@ impl InternalRBACRules {
         x.perm("ReportScoutFirmwareUpgradeStatus", vec![Scout]);
         x.perm("DiscoverDhcp", vec![Dhcp, Machineatron]);
         x.perm("ExpireDhcpLease", vec![Dhcp, Machineatron]);
+        x.perm("PrepareStaticAddress", vec![ForgeAdminCLI]);
         x.perm("AssignStaticAddress", vec![ForgeAdminCLI]);
         x.perm("RemoveStaticAddress", vec![ForgeAdminCLI]);
         x.perm("FindInterfaceAddresses", vec![ForgeAdminCLI]);
@@ -389,6 +399,11 @@ impl InternalRBACRules {
             vec![ForgeAdminCLI, Flow],
         );
         x.perm("GetDpuInfoList", vec![Agent]);
+        x.perm("SetHostBootIntent", vec![ForgeAdminCLI, SiteAgent]);
+        x.perm("GetHostBootIntent", vec![ForgeAdminCLI, SiteAgent]);
+        x.perm("AcknowledgeHostBoot", vec![ForgeAdminCLI, SiteAgent, Scout]);
+        x.perm("CancelHostBoot", vec![ForgeAdminCLI, SiteAgent]);
+        x.perm("ReleaseHostBootPolicy", vec![ForgeAdminCLI, SiteAgent]);
         x.perm("GetMachineBootOverride", vec![ForgeAdminCLI]);
         x.perm("SetMachineBootOverride", vec![ForgeAdminCLI]);
         x.perm("ClearMachineBootOverride", vec![ForgeAdminCLI]);

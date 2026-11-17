@@ -99,7 +99,10 @@ impl HwType {
             // TODO(dgx-gb300): set the infinite-boot attribute from the DGX GB300 BIOS.
             Self::DgxGb300 => None,
             Self::Hpe => None,
-            Self::Lenovo => Some(BiosAttr::new_str("BootModes_InfiniteBootRetry", "Enabled")),
+            Self::Lenovo => Some(BiosAttr::new_any_str(
+                "BootModes_InfiniteBootRetry",
+                &["Enabled", "Enable"],
+            )),
             Self::LenovoAmi => Some(BiosAttr::new_str("EndlessBoot", "Enabled")),
             Self::GigaComputingAmi => Some(BiosAttr::new_str("GBT0183", "Enabled")),
             Self::LenovoGb300 => Some(BiosAttr::new_int("LEM0003", 50)),

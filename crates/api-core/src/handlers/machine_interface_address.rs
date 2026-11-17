@@ -19,10 +19,13 @@ use std::net::IpAddr;
 
 use carbide_instrument::emit;
 use carbide_network::ip::IdentifyAddressFamily;
+use carbide_uuid::machine::HostMachineId;
 use mac_address::MacAddress;
 use model::address_selection_strategy::AddressSelectionStrategy;
 use model::allocation_type::AllocationType;
 use model::expected_machine::ExpectedInterface;
+use model::machine::machine_search_config::MachineSearchConfig;
+use model::machine::{InstanceState, MachineInterfaceSnapshot, ManagedHostState};
 use model::machine_interface::InterfaceType;
 use model::network_segment::NetworkSegmentType;
 use rpc::forge as rpc;
@@ -338,6 +341,179 @@ pub(crate) async fn assign_static_address(
     result
 }
 
+/// A zero-DPU auto Instance shares its physical HostInband address. Keep the
+/// reservation and generated config atomic with a same-segment address change.
+async fn sync_assigned_host_inband_address(
+    txn: &mut sqlx::PgConnection,
+    previous: &MachineInterfaceSnapshot,
+    current: &MachineInterfaceSnapshot,
+) -> Result<(), CarbideError> {
+    if previous.network_segment_type != Some(NetworkSegmentType::HostInband)
+        || previous.interface_type != InterfaceType::Data
+    {
+        return Ok(());
+    }
+    let Some(machine_id) = current.machine_id else {
+        return Ok(());
+    };
+    let Ok(host_id) = HostMachineId::try_from(machine_id) else {
+        return Ok(());
+    };
+    // Match Instance configuration/cleanup: address table, Instance, then Machine.
+    let Some(instance) =
+        db::instance::find_live_by_machine_id_for_update(&mut *txn, &machine_id).await?
+    else {
+        return Ok(());
+    };
+    if instance.config.network.auto_config.is_none() {
+        return Ok(());
+    }
+    let Some(host) = db::machine::find_one(
+        &mut *txn,
+        &host_id,
+        MachineSearchConfig {
+            for_update: true,
+            ..Default::default()
+        },
+    )
+    .await?
+    else {
+        return Ok(());
+    };
+    if previous.segment_id != current.segment_id
+        || !host.associated_dpu_machine_ids().is_empty()
+        || instance.update_network_config_request.is_some()
+        || !matches!(
+            host.current_state(),
+            ManagedHostState::Assigned {
+                instance_state: InstanceState::Ready
+            }
+        )
+    {
+        return Err(CarbideError::FailedPrecondition(
+            "changing an assigned auto HostInband address requires a Ready zero-DPU host on the same segment with no pending network update".to_string(),
+        ));
+    }
+    let mut network = instance.config.network.clone();
+    let interfaces = network
+        .interfaces
+        .iter_mut()
+        .filter(|iface| iface.network_segment_id == Some(current.segment_id))
+        .collect::<Vec<_>>();
+    let [interface] = interfaces.as_slice() else {
+        return Err(CarbideError::FailedPrecondition(
+            "assigned auto Instance has no unique HostInband interface".to_string(),
+        ));
+    };
+    if interface
+        .host_inband_mac_address
+        .is_some_and(|mac| mac != current.mac_address)
+    {
+        return Err(CarbideError::FailedPrecondition(
+            "assigned HostInband MAC does not match the physical interface".to_string(),
+        ));
+    }
+    let stored = db::instance_address::find_all_by_instance_id_and_segment_id(
+        &mut *txn,
+        &instance.id,
+        &current.segment_id,
+    )
+    .await?;
+    if interface
+        .ip_addrs
+        .values()
+        .all(|ip| current.addresses.contains(ip))
+        && current
+            .addresses
+            .iter()
+            .all(|ip| interface.ip_addrs.values().any(|stored| stored == ip))
+        && stored
+            .iter()
+            .map(|row| row.address)
+            .collect::<std::collections::HashSet<_>>()
+            == current.addresses.iter().copied().collect()
+    {
+        return Ok(());
+    }
+    for address in &current.addresses {
+        if db::instance_address::find_all_by_address(&mut *txn, *address)
+            .await?
+            .iter()
+            .any(|owner| owner.instance_id != instance.id)
+        {
+            return Err(CarbideError::FailedPrecondition(
+                "new HostInband address belongs to another Instance".to_string(),
+            ));
+        }
+    }
+    let released = stored
+        .iter()
+        .map(|row| (row.segment_id, row.address))
+        .collect::<Vec<_>>();
+    db::instance_address::delete_addresses_for_instance(&mut *txn, instance.id, &released).await?;
+    for iface in &mut network.interfaces {
+        if iface.network_segment_id == Some(current.segment_id) {
+            iface.ip_addrs.clear();
+            iface.interface_prefixes.clear();
+            iface.network_segment_gateways.clear();
+        }
+    }
+    let network =
+        db::instance_network_config::with_allocated_ips(network, &mut *txn, instance.id, &host)
+            .await?;
+    db::instance::update_network_config(
+        txn,
+        instance.id,
+        instance.network_config_version,
+        &network,
+        true,
+    )
+    .await?;
+    Ok(())
+}
+
+/// Prepare a Redfish address change without redirecting Core to an unverified IP.
+pub(crate) async fn prepare_static_address(
+    api: &Api,
+    request: Request<rpc::PrepareStaticAddressRequest>,
+) -> Result<Response<()>, CarbideError> {
+    let req = request.into_inner();
+    let interface_id = req.interface_id.ok_or(CarbideError::InvalidArgument(
+        "interface_id is required".into(),
+    ))?;
+    let target: std::net::IpAddr = req.ip_address.parse()?;
+    let current: std::net::IpAddr = req.current_ip_address.parse()?;
+    let mut txn = api.txn_begin().await?;
+    db::instance_address::lock_table_for_allocation(&mut txn).await?;
+    db::machine_interface::lock_for_address_assignment(&mut txn, interface_id).await?;
+    let iface = db::machine_interface::find_one(&mut txn, interface_id).await?;
+    let addresses =
+        db::machine_interface_address::find_for_interface(&mut txn, interface_id).await?;
+    if !addresses.iter().any(|a| a.address == current) {
+        return Err(CarbideError::InvalidArgument(
+            "current contact address changed".into(),
+        ));
+    }
+    let segment = db::network_segment::for_static_address(txn.as_pgconn(), target).await?;
+    if segment.id != iface.segment_id {
+        return Err(CarbideError::InvalidArgument(
+            "target must belong to the current managed segment".into(),
+        ));
+    }
+    // Keep the old contact held even if its previous DHCP lease expires while
+    // Redfish is switching. This changes its allocation type, never its address.
+    if addresses
+        .iter()
+        .any(|a| a.address == current && a.allocation_type != AllocationType::Static)
+    {
+        db::machine_interface_address::assign_static(&mut txn, interface_id, current).await?;
+    }
+    db::machine_interface_address::stage_static(&mut txn, interface_id, target).await?;
+    txn.commit().await?;
+    tracing::info!(%interface_id, %target, %current, "Prepared static address without changing contact");
+    Ok(Response::new(()))
+}
+
 async fn assign_static_address_inner(
     api: &Api,
     request: Request<rpc::AssignStaticAddressRequest>,
@@ -349,7 +525,10 @@ async fn assign_static_address_inner(
     let ip_address: std::net::IpAddr = req.ip_address.parse()?;
 
     let mut txn = api.txn_begin().await?;
+    // Match Instance allocation lock order, then serialize interface writers.
+    db::instance_address::lock_table_for_allocation(&mut txn).await?;
     db::machine_interface::lock_for_address_assignment(txn.as_pgconn(), interface_id).await?;
+    let previous_iface = db::machine_interface::find_one(&mut txn, interface_id).await?;
 
     // Resolve the correct segment for this IP and update the interface
     // if needed. IPs within a managed prefix go on that prefix's segment.
@@ -404,6 +583,8 @@ async fn assign_static_address_inner(
     )
     .await?;
 
+    let current_iface = db::machine_interface::find_one(&mut txn, interface_id).await?;
+    sync_assigned_host_inband_address(&mut txn, &previous_iface, &current_iface).await?;
     txn.commit().await?;
 
     let status: rpc::AssignStaticAddressStatus = result.into();

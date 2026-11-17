@@ -767,6 +767,161 @@ async fn test_zero_dpu_cloud_init_prefers_instance_when_ip_matches_host_interfac
             instance_id.to_string()
         );
     }
+    // An address change must move both owners before a new installer fetches NoCloud.
+    let mut octets = match host_ip {
+        std::net::IpAddr::V4(ip) => ip.octets(),
+        _ => panic!("the fixture requires IPv4"),
+    };
+    let interface_id = host_interfaces[&mh.host().id][0].id;
+    for (last_octet, simulate_legacy_drift) in [(200, false), (201, true)] {
+        octets[3] = last_octet;
+        let next_ip = std::net::IpAddr::from(octets);
+        let before = db::instance::find_by_id(&env.pool, instance_id)
+            .await
+            .unwrap()
+            .unwrap();
+        let old_ip = *before.config.network.interfaces[0]
+            .ip_addrs
+            .values()
+            .next()
+            .unwrap();
+        if simulate_legacy_drift {
+            let mut txn = env.pool.begin().await.unwrap();
+            db::machine_interface_address::assign_static(txn.as_mut(), interface_id, next_ip)
+                .await
+                .unwrap();
+            txn.commit().await.unwrap();
+        }
+        env.api
+            .assign_static_address(
+                rpc::forge::AssignStaticAddressRequest {
+                    interface_id: Some(interface_id),
+                    ip_address: next_ip.to_string(),
+                }
+                .into_request(),
+            )
+            .await
+            .expect("HostInband address and Instance must move atomically");
+        let after = db::instance::find_by_id(&env.pool, instance_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            after.config.os, before.config.os,
+            "address assignment must preserve OS config"
+        );
+        assert_eq!(
+            after.network_config_version.version_nr(),
+            before.network_config_version.version_nr() + 1
+        );
+        assert!(
+            after.config.network.interfaces[0]
+                .ip_addrs
+                .values()
+                .any(|ip| *ip == next_ip)
+        );
+        assert!(
+            db::instance_address::find_all_by_address(&env.pool, old_ip)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        let owners = db::instance_address::find_all_by_address(&env.pool, next_ip)
+            .await
+            .unwrap();
+        assert_eq!(owners.len(), 1);
+        assert_eq!(owners[0].instance_id, instance_id);
+        let cloud_init = env
+            .api
+            .get_cloud_init_instructions(
+                rpc::forge::CloudInitInstructionsRequest {
+                    ip: next_ip.to_string(),
+                }
+                .into_request(),
+            )
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(
+            cloud_init.custom_cloud_init.as_deref(),
+            Some(tenant_user_data)
+        );
+        assert_eq!(
+            cloud_init.metadata.unwrap().instance_id,
+            instance_id.to_string()
+        );
+        env.api
+            .assign_static_address(
+                rpc::forge::AssignStaticAddressRequest {
+                    interface_id: Some(interface_id),
+                    ip_address: next_ip.to_string(),
+                }
+                .into_request(),
+            )
+            .await
+            .unwrap();
+        let repeated = db::instance::find_by_id(&env.pool, instance_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            repeated.network_config_version, after.network_config_version,
+            "same-address reconciliation must not churn Instance versions"
+        );
+    }
+
+    // A pending network replacement must reject the entire address change,
+    // including the physical interface write made earlier in the handler.
+    let before = db::instance::find_by_id(&env.pool, instance_id)
+        .await
+        .unwrap()
+        .unwrap();
+    let mut txn = env.pool.begin().await.unwrap();
+    db::instance::trigger_update_network_config_request(
+        &instance_id,
+        &before.config.network,
+        &before.config.network,
+        &mut txn,
+    )
+    .await
+    .unwrap();
+    txn.commit().await.unwrap();
+    octets[3] = 202;
+    let rejected_ip = std::net::IpAddr::from(octets);
+    let result = env
+        .api
+        .assign_static_address(
+            rpc::forge::AssignStaticAddressRequest {
+                interface_id: Some(interface_id),
+                ip_address: rejected_ip.to_string(),
+            }
+            .into_request(),
+        )
+        .await;
+    assert_eq!(result.unwrap_err().code(), tonic::Code::FailedPrecondition);
+    let mut conn = env.pool.acquire().await.unwrap();
+    let physical = db::machine_interface::find_one(&mut *conn, interface_id)
+        .await
+        .unwrap();
+    assert!(!physical.addresses.contains(&rejected_ip));
+    assert!(physical.addresses.iter().all(|ip| {
+        before.config.network.interfaces[0]
+            .ip_addrs
+            .values()
+            .any(|old| old == ip)
+    }));
+    let after = db::instance::find_by_id(&env.pool, instance_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(after.config.network, before.config.network);
+    assert_eq!(after.network_config_version, before.network_config_version);
+    assert!(
+        db::instance_address::find_all_by_address(&env.pool, rejected_ip)
+            .await
+            .unwrap()
+            .is_empty()
+    );
 }
 
 #[crate::sqlx_test]

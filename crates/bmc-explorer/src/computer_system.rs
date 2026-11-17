@@ -794,6 +794,90 @@ mod tests {
     };
 
     #[tokio::test]
+    async fn lenovo_bios_verification_and_infinite_boot_accept_enum_aliases() {
+        use bmc_mock::injection::{Action, Rule, Selector};
+        use serde_json::json;
+
+        use super::ExploredComputerSystem;
+        use crate::hw::{HwType, lenovo};
+
+        let http = lenovo::EXPECTED_BIOS_ATTRS
+            .iter()
+            .find(|attribute| attribute.key == "NetworkStackSettings_IPv4HTTPSupport")
+            .unwrap();
+        let pxe = lenovo::EXPECTED_BIOS_ATTRS
+            .iter()
+            .find(|attribute| attribute.key == "NetworkStackSettings_IPv4PXESupport")
+            .unwrap();
+        let infinite_boot = HwType::Lenovo.infinite_boot_enabled_attr().unwrap();
+        for (actual, enabled, disabled) in [
+            (json!("Enable"), true, false),
+            (json!("Enabled"), true, false),
+            (json!("Disable"), false, true),
+            (json!("Disabled"), false, true),
+            (json!("Auto"), false, false),
+            (json!(true), false, false),
+        ] {
+            let h = bmc_mock::test_support::lenovo_gb300_bmc().await;
+            h.state.injection.upsert(Rule {
+                id: "lenovo-bios-enums".into(),
+                selector: Selector::OdataId("/redfish/v1/Systems/System_0/Bios".into()),
+                action: Action::JsonMerge(json!({"Attributes": {
+                    "NetworkStackSettings_IPv4HTTPSupport": actual,
+                    "NetworkStackSettings_IPv4PXESupport": actual,
+                    "BootModes_InfiniteBootRetry": actual,
+                }})),
+                remaining: None,
+            });
+            let root = h.service_root.as_ref().clone().restrict_expand();
+            let system = root
+                .systems()
+                .await
+                .unwrap()
+                .unwrap()
+                .members()
+                .await
+                .unwrap()
+                .into_iter()
+                .find(|system| system.raw().id == "System_0")
+                .unwrap();
+            let bios = system
+                .bios()
+                .await
+                .unwrap()
+                .expect("mock BIOS must be linked");
+            assert!(
+                bios.attribute(http.key).is_some(),
+                "mock attribute must exist"
+            );
+            let explored = ExploredComputerSystem {
+                system,
+                bios: Some(bios),
+                boot_options: None,
+                ethernet_interfaces: Vec::new(),
+                oem_nvidia_bluefield: None,
+                secure_boot: None,
+                processors: None,
+            };
+            assert_eq!(
+                explored.verify_bios_attr(http).is_none(),
+                enabled,
+                "HTTP {actual}"
+            );
+            assert_eq!(
+                explored.verify_bios_attr(pxe).is_none(),
+                disabled,
+                "PXE {actual}"
+            );
+            assert_eq!(
+                explored.bios_attr_eq(&infinite_boot),
+                Some(enabled),
+                "retry {actual}"
+            );
+        }
+    }
+
+    #[tokio::test]
     async fn exploration_configuration_controls_linked_resources() {
         use bmc_mock::injection::{Action, Rule, Selector};
 

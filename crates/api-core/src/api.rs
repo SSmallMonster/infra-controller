@@ -619,6 +619,27 @@ impl Forge for Api {
         crate::handlers::network_segment::add_prefix(self, request).await
     }
 
+    async fn find_network_segment_dhcp_ranges(
+        &self,
+        request: Request<rpc::NetworkSegmentIdList>,
+    ) -> Result<Response<rpc::NetworkSegmentDhcpRangeList>, Status> {
+        crate::handlers::network_segment::find_dhcp_ranges(self, request).await
+    }
+
+    async fn set_network_segment_dhcp_range(
+        &self,
+        request: Request<rpc::NetworkSegmentDhcpRangeUpdateRequest>,
+    ) -> Result<Response<rpc::NetworkSegmentDhcpRange>, Status> {
+        crate::handlers::network_segment::set_dhcp_range(self, request).await
+    }
+
+    async fn create_network_segment_with_dhcp_range(
+        &self,
+        request: Request<rpc::NetworkSegmentWithDhcpRangeCreationRequest>,
+    ) -> Result<Response<rpc::NetworkSegment>, Status> {
+        crate::handlers::network_segment::create_with_dhcp_range(self, request).await
+    }
+
     async fn attach_network_segment_to_vpc(
         &self,
         request: Request<rpc::AttachNetworkSegmentToVpcRequest>,
@@ -1195,6 +1216,16 @@ impl Forge for Api {
         crate::handlers::machine::find_machine_health_histories(self, request).await
     }
 
+    async fn prepare_static_address(
+        &self,
+        request: Request<rpc::PrepareStaticAddressRequest>,
+    ) -> Result<Response<()>, Status> {
+        Ok(
+            crate::handlers::machine_interface_address::prepare_static_address(self, request)
+                .await?,
+        )
+    }
+
     async fn assign_static_address(
         &self,
         request: Request<rpc::AssignStaticAddressRequest>,
@@ -1744,6 +1775,51 @@ impl Forge for Api {
         request: Request<rpc::GetDpuInfoListRequest>,
     ) -> Result<Response<rpc::GetDpuInfoListResponse>, Status> {
         crate::handlers::machine::get_dpu_info_list(self, request).await
+    }
+
+    async fn set_host_boot_intent(
+        &self,
+        request: Request<rpc::SetHostBootIntentRequest>,
+    ) -> Result<Response<rpc::HostBootStatus>, Status> {
+        crate::handlers::host_boot::set(self, request)
+            .await
+            .map_err(Into::into)
+    }
+
+    async fn get_host_boot_intent(
+        &self,
+        request: Request<rpc::GetHostBootIntentRequest>,
+    ) -> Result<Response<rpc::HostBootStatus>, Status> {
+        crate::handlers::host_boot::get(self, request)
+            .await
+            .map_err(Into::into)
+    }
+
+    async fn acknowledge_host_boot(
+        &self,
+        request: Request<rpc::AcknowledgeHostBootRequest>,
+    ) -> Result<Response<rpc::HostBootStatus>, Status> {
+        crate::handlers::host_boot::acknowledge(self, request)
+            .await
+            .map_err(Into::into)
+    }
+
+    async fn cancel_host_boot(
+        &self,
+        request: Request<rpc::CancelHostBootRequest>,
+    ) -> Result<Response<rpc::HostBootStatus>, Status> {
+        crate::handlers::host_boot::cancel(self, request)
+            .await
+            .map_err(Into::into)
+    }
+
+    async fn release_host_boot_policy(
+        &self,
+        request: Request<rpc::CancelHostBootRequest>,
+    ) -> Result<Response<()>, Status> {
+        crate::handlers::host_boot::release(self, request)
+            .await
+            .map_err(Into::into)
     }
 
     async fn get_machine_boot_override(
