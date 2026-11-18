@@ -411,6 +411,8 @@ impl InternalRBACRules {
         x.perm("GetNetworkTopology", vec![ForgeAdminCLI]);
         x.perm("FindNetworkDevicesByDeviceIds", vec![ForgeAdminCLI]);
         x.perm("CreateCredential", vec![ForgeAdminCLI, SiteAgent]);
+        x.perm("GetSiteCredentialReadiness", vec![ForgeAdminCLI]);
+        x.perm("InitializeSiteCredentials", vec![ForgeAdminCLI]);
         x.perm("DeleteCredential", vec![ForgeAdminCLI]);
         x.perm("RotateCredential", vec![ForgeAdminCLI, SiteAgent]);
         x.perm(

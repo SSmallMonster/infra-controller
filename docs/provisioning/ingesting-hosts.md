@@ -142,6 +142,8 @@ https://api-<ENVIRONMENT_NAME>.<SITE_DOMAIN_NAME> \
 
 ### Store Host and DPU BMC Password
 
+For a management console, `forge.Forge/GetSiteCredentialReadiness` returns the presence of the three discovery defaults without exposing passwords. `forge.Forge/InitializeSiteCredentials` is an admin-only, create-only alternative for first initialization. It accepts operator-supplied values, or generates missing values on explicit request for a new estate. Existing values are preserved. A site with machine or credential history must restore original values instead of generating replacements. The request never approves ingestion, contacts hardware, or rotates a password. After an interrupted initialization, check readiness before submitting again. Existing but unusable values or locally owned missing defaults require recovery at the configured source.
+
 Run this command to store the desired Host and DPU BMC password:
 
 This API workflow requires `bmc_site_wide_root_source = "backend"`, or the

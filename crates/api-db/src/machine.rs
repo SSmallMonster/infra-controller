@@ -3065,6 +3065,17 @@ pub async fn set_dpu_agent_upgrade_requested(
     Ok(())
 }
 
+/// Whether existing hardware or credential history makes generating new site passwords unsafe.
+pub async fn site_credential_recovery_required(
+    conn: &mut sqlx::PgConnection,
+) -> Result<bool, DatabaseError> {
+    let query = "SELECT EXISTS (SELECT 1 FROM machines) OR EXISTS (SELECT 1 FROM machine_state_history) OR EXISTS (SELECT 1 FROM device_credential_rotation) OR EXISTS (SELECT 1 FROM sitewide_credential_rotation WHERE target_version > 0)";
+    sqlx::query_scalar(query)
+        .fetch_one(conn)
+        .await
+        .map_err(|e| DatabaseError::query(query, e))
+}
+
 pub async fn find_machine_ids<ID>(
     txn: impl DbReader<'_>,
     search_config: MachineSearchConfig,

@@ -52,6 +52,117 @@ pub(crate) const MAX_BGP_PASSWORD_LENGTH: usize = 80;
 const MISSING_FIRMWARE_ARTIFACT_CREDENTIAL_NAME: &str =
     "firmware artifact access token credential name is required";
 
+fn site_keys() -> [(rpc::CredentialType, CredentialKey); 3] {
+    use carbide_secrets::credentials::REQUIRED_SITE_DEFAULT_CREDENTIAL_KEYS;
+    REQUIRED_SITE_DEFAULT_CREDENTIAL_KEYS.map(|key| {
+        let kind = match key {
+            CredentialKey::BmcCredentials { .. } => rpc::CredentialType::SiteWideBmcRoot,
+            CredentialKey::HostUefi { .. } => rpc::CredentialType::HostUefi,
+            CredentialKey::DpuUefi { .. } => rpc::CredentialType::DpuUefi,
+            _ => unreachable!("discovery site default key"),
+        };
+        (kind, key)
+    })
+}
+
+pub(crate) async fn site_defaults(api: &Api) -> Result<rpc::SiteCredentialReadiness, Status> {
+    let mut result = rpc::SiteCredentialReadiness::default();
+    for (kind, key) in site_keys() {
+        match api.credential_manager.get_credentials(&key).await {
+            Ok(Some(Credentials::UsernamePassword { password, .. })) if !password.is_empty() => {
+                result.configured.push(kind as i32)
+            }
+            Ok(None) => result.missing.push(kind as i32),
+            Ok(Some(_)) | Err(SecretsError::BmcSiteWideRootV0CredentialReadBlocked) => {
+                result.requires_recovery.push(kind as i32)
+            }
+            Err(_) => return Err(Status::unavailable("cannot verify site credential store")),
+        }
+    }
+    if !result.missing.is_empty() {
+        let mut txn = api.txn_begin().await?;
+        result.recovery_site = db::machine::site_credential_recovery_required(&mut txn).await?;
+        txn.commit().await?;
+    }
+    Ok(result)
+}
+
+pub(crate) async fn initialize_site_defaults(
+    api: &Api,
+    req: rpc::SiteCredentialInitializationRequest,
+) -> Result<Response<rpc::SiteCredentialReadiness>, Status> {
+    let before = site_defaults(api).await?;
+    if !before.missing.is_empty()
+        && api
+            .runtime_config
+            .secrets
+            .as_ref()
+            .is_some_and(|config| !config.backends.contains(&config.writer))
+    {
+        return Err(Status::failed_precondition(
+            "credential writer is not an authoritative read backend",
+        ));
+    }
+    if !before.requires_recovery.is_empty() {
+        return Err(Status::failed_precondition(
+            "recover existing or externally owned site credentials first",
+        ));
+    }
+    let mut planned = Vec::new();
+    for (kind, key) in site_keys() {
+        if !before.missing.contains(&(kind as i32)) {
+            continue;
+        }
+        let supplied = match kind {
+            rpc::CredentialType::SiteWideBmcRoot => &req.bmc_password,
+            rpc::CredentialType::HostUefi => &req.host_uefi_password,
+            _ => &req.dpu_uefi_password,
+        };
+        let password = match supplied {
+            Some(p) if !p.is_empty() && p.len() <= 256 && !p.chars().any(char::is_control) => {
+                p.clone()
+            }
+            Some(_) => return Err(Status::invalid_argument("invalid supplied site password")),
+            None if before.recovery_site || !req.generate_missing => {
+                return Err(Status::failed_precondition(
+                    "operator-supplied site credentials required",
+                ));
+            }
+            None if kind == rpc::CredentialType::SiteWideBmcRoot => {
+                Credentials::generate_password()
+            }
+            None => Credentials::generate_password_no_special_char(),
+        };
+        planned.push((key, Credentials::new("", password)));
+    }
+    for (key, value) in planned {
+        if api
+            .credential_manager
+            .create_credentials(&key, &value)
+            .await
+            .is_err()
+        {
+            return Err(Status::failed_precondition(
+                "create-only initialization not confirmed; recheck site credential status",
+            ));
+        }
+        if matches!(key, CredentialKey::BmcCredentials { .. })
+            && crate::dpa::lockdown::ensure_lockdown_ikm_seeded(&*api.credential_manager)
+                .await
+                .is_err()
+        {
+            tracing::warn!("initial NIC lockdown IKM seeding deferred to background retry");
+        }
+    }
+    let after = site_defaults(api).await?;
+    if !after.missing.is_empty() || !after.requires_recovery.is_empty() {
+        return Err(Status::failed_precondition(
+            "site credentials could not be verified after initialization",
+        ));
+    }
+    Ok(Response::new(after))
+}
+
 pub(crate) async fn create_credential(
     api: &Api,
     request: tonic::Request<rpc::CredentialCreationRequest>,

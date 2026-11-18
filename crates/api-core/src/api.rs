@@ -1938,6 +1938,22 @@ impl Forge for Api {
         crate::handlers::dpu::dpu_agent_upgrade_policy_action(self, request).await
     }
 
+    async fn get_site_credential_readiness(
+        &self,
+        _request: Request<()>,
+    ) -> Result<Response<rpc::SiteCredentialReadiness>, Status> {
+        Ok(Response::new(
+            crate::handlers::credential::site_defaults(self).await?,
+        ))
+    }
+
+    async fn initialize_site_credentials(
+        &self,
+        request: Request<rpc::SiteCredentialInitializationRequest>,
+    ) -> Result<Response<rpc::SiteCredentialReadiness>, Status> {
+        crate::handlers::credential::initialize_site_defaults(self, request.into_inner()).await
+    }
+
     async fn create_credential(
         &self,
         request: Request<rpc::CredentialCreationRequest>,

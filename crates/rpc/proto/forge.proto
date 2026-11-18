@@ -585,6 +585,11 @@ service Forge {
   // Create Credential in Vault
   rpc CreateCredential(CredentialCreationRequest) returns (CredentialCreationResult);
 
+  // Read the three discovery prerequisites without returning any credential material.
+  rpc GetSiteCredentialReadiness(google.protobuf.Empty) returns (SiteCredentialReadiness);
+  // Initialize absent defaults only. Does not rotate credentials or contact devices.
+  rpc InitializeSiteCredentials(SiteCredentialInitializationRequest) returns (SiteCredentialReadiness);
+
   // Delete Credential in Vault
   rpc DeleteCredential(CredentialDeletionRequest) returns (CredentialDeletionResult);
 
@@ -2030,6 +2035,26 @@ message CredentialDeletionRequest {
 
 message CredentialCreationResult {
 
+}
+
+message SiteCredentialReadiness {
+  // Defaults which resolve to an effective nonempty password.
+  repeated CredentialType configured = 1;
+  // Defaults authoritatively absent from the credential manager.
+  repeated CredentialType missing = 2;
+  // Existing but empty or externally owned defaults requiring operator recovery.
+  repeated CredentialType requires_recovery = 3;
+  // Existing device or rotation history prohibits generating replacement values.
+  bool recovery_site = 4;
+}
+
+message SiteCredentialInitializationRequest {
+  // Explicit confirmation that random values may be generated for an unused site.
+  bool generate_missing = 1;
+  // Optional operator-supplied values, consumed only for absent defaults.
+  optional string bmc_password = 2;
+  optional string host_uefi_password = 3;
+  optional string dpu_uefi_password = 4;
 }
 
 message CredentialDeletionResult {
