@@ -17,6 +17,14 @@
 ARG CONTAINER_RUNTIME_X86_64
 
 FROM $CONTAINER_RUNTIME_X86_64
+ARG OCI_SOURCE=https://github.com/dsx-ai-factory/infra-controller
+ARG VCS_REF=unknown
+ARG VERSION=unknown
+LABEL org.opencontainers.image.title="NICo x86_64 boot artifacts" \
+      org.opencontainers.image.source="${OCI_SOURCE}" \
+      org.opencontainers.image.revision="${VCS_REF}" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.licenses="Apache-2.0"
 
 WORKDIR /
 COPY pxe/static/blobs/internal/ /

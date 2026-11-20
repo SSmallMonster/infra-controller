@@ -102,6 +102,9 @@ bootstrap: ## Set up an Ubuntu/Debian build host: apt deps, rustup, submodules, 
 
 IMAGE_REGISTRY ?= localhost:5000
 IMAGE_TAG ?= latest
+CORE_IMAGE_NAME ?= nico
+OCI_SOURCE ?= https://github.com/dsx-ai-factory/infra-controller
+VCS_REF ?= $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 CI_COMMIT_SHORT_SHA ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 LOCAL_REGISTRY_CONTAINER ?= nico-build-registry
@@ -143,7 +146,7 @@ images: ## Build the deployable service stack (NICo Core + REST images)
 	$(MAKE) images-core images-rest
 	@echo ""
 	@echo "Deployable images pushed under $(IMAGE_REGISTRY) (tag: $(IMAGE_TAG)):"
-	@echo "  $(IMAGE_REGISTRY)/nico:$(IMAGE_TAG)   (NICo Core)"
+	@echo "  $(IMAGE_REGISTRY)/$(CORE_IMAGE_NAME):$(IMAGE_TAG)   (NICo Core)"
 	@echo "  $(IMAGE_REGISTRY)/nico-rest-*:$(IMAGE_TAG)       (REST services)"
 
 images-arm: ## Build the deployable ARM64 service stack natively on an ARM64 Docker host
@@ -197,7 +200,7 @@ images-base: ## Build and push the Core base containers (NICO_ARCHES="amd64 arm6
 		docker buildx build --platform linux/$$arch --push --build-arg KEA_VERSION=$(KEA_VERSION) --file $$runtime_file -t $$runtime_tag . ; \
 	done
 
-images-core: ## Build the NICo Core image (nico) (NICO_ARCHES="amd64 arm64")
+images-core: ## Build the NICo Core image (CORE_IMAGE_NAME=nico, NICO_ARCHES="amd64 arm64")
 	$(call check-arches,$(NICO_ARCHES),NICO_ARCHES)
 	$(MAKE) images-base
 	@set -e; \
@@ -209,14 +212,16 @@ images-core: ## Build the NICo Core image (nico) (NICO_ARCHES="amd64 arm64")
 			arm64) file=dev/docker/Dockerfile.release-container-aarch64; \
 			       buildarg="--build-arg CONTAINER_BUILD_AARCH64=$(CORE_BUILD_CONTAINER_ARM64) --build-arg CONTAINER_RUNTIME_AARCH64=$(CORE_RUNTIME_CONTAINER_ARM64)" ;; \
 		esac; \
-		tag=$(IMAGE_REGISTRY)/nico:$(IMAGE_TAG)-$$arch; \
+		tag=$(IMAGE_REGISTRY)/$(CORE_IMAGE_NAME):$(IMAGE_TAG)-$$arch; \
 		docker buildx build --platform linux/$$arch --push $$buildarg \
 			--build-arg VERSION=$(VERSION) \
 			--build-arg CI_COMMIT_SHORT_SHA=$(CI_COMMIT_SHORT_SHA) \
+			--build-arg OCI_SOURCE=$(OCI_SOURCE) \
+			--build-arg VCS_REF=$(VCS_REF) \
 			--file $$file -t $$tag . ; \
 		tags="$$tags $$tag"; \
 	done; \
-	docker buildx imagetools create -t $(IMAGE_REGISTRY)/nico:$(IMAGE_TAG) $$tags
+	docker buildx imagetools create -t $(IMAGE_REGISTRY)/$(CORE_IMAGE_NAME):$(IMAGE_TAG) $$tags
 
 images-rest: ## Build the REST service images (api, workflow, site-manager, site-agent, db, cert-manager, flow, psm, nsm) (NICO_ARCHES="amd64 arm64")
 	$(call check-arches,$(NICO_ARCHES),NICO_ARCHES)
@@ -272,6 +277,7 @@ images-boot-artifacts: ## Build the x86 boot-artifact image (BOOT_ARTIFACTS_ARCH
 	for arch in $(BOOT_ARTIFACTS_ARCHES); do \
 		tag=$(IMAGE_REGISTRY)/boot-artifacts-x86_64:$(IMAGE_TAG)-$$arch; \
 		docker buildx build --platform linux/$$arch --push --build-arg CONTAINER_RUNTIME_X86_64=$(BOOT_ARTIFACTS_RUNTIME_IMAGE) \
+			--build-arg OCI_SOURCE=$(OCI_SOURCE) --build-arg VCS_REF=$(VCS_REF) --build-arg VERSION=$(VERSION) \
 			-t $$tag --file dev/docker/Dockerfile.release-artifacts-x86_64 . ; \
 		tags="$$tags $$tag"; \
 	done; \
