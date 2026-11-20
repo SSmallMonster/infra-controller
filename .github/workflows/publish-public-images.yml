@@ -12,13 +12,23 @@ on:
         required: true
         default: true
         type: boolean
-      build_boot_artifacts:
-        description: Build and publish the amd64 x86_64 boot-artifact image
+      build_x86_boot_artifacts:
+        description: Build and publish the x86_64 host boot-artifact image
         required: true
         default: true
         type: boolean
+      build_grace_arm64_boot_artifacts:
+        description: Build Grace ARM64 host files and publish their amd64 carrier image
+        required: true
+        default: true
+        type: boolean
+      build_dpu_boot_artifacts:
+        description: Build and publish the BlueField DPU BFB carrier image
+        required: true
+        default: false
+        type: boolean
       publish_main:
-        description: Also update the moving main tag (only allowed from the default branch)
+        description: Also update moving main tags (default branch only)
         required: true
         default: true
         type: boolean
@@ -36,7 +46,31 @@ env:
   OCI_SOURCE: https://github.com/SSmallMonster/infra-controller
 
 jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.publication.outputs.tag }}
+    steps:
+      - name: Resolve publication tag
+        id: publication
+        env:
+          REQUESTED_TAG: ${{ inputs.image_tag }}
+          PUBLISH_MAIN: ${{ inputs.publish_main }}
+        run: |
+          set -euo pipefail
+          tag=${REQUESTED_TAG:-main-${GITHUB_SHA:0:12}}
+          if [[ ! "$tag" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
+            echo "Invalid OCI tag: $tag" >&2
+            exit 1
+          fi
+          if [[ "$PUBLISH_MAIN" == true && "$GITHUB_REF_NAME" != "${{ github.event.repository.default_branch }}" ]]; then
+            echo "The moving main tag can only be updated from the default branch." >&2
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
   core:
+    needs: prepare
     if: inputs.build_core
     runs-on: [self-hosted, linux, x64, nico-builder]
     timeout-minutes: 360
@@ -67,24 +101,6 @@ jobs:
             exit 1
           fi
 
-      - name: Resolve publication tag
-        id: publication
-        env:
-          REQUESTED_TAG: ${{ inputs.image_tag }}
-          PUBLISH_MAIN: ${{ inputs.publish_main }}
-        run: |
-          set -euo pipefail
-          tag=${REQUESTED_TAG:-main-${GITHUB_SHA:0:12}}
-          if [[ ! "$tag" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
-            echo "Invalid OCI tag: $tag" >&2
-            exit 1
-          fi
-          if [[ "$PUBLISH_MAIN" == true && "$GITHUB_REF_NAME" != "${{ github.event.repository.default_branch }}" ]]; then
-            echo "The moving main tag can only be updated from the default branch." >&2
-            exit 1
-          fi
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-
       - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
@@ -92,15 +108,18 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Configure Buildx
-        uses: docker/setup-buildx-action@v3
-        with:
-          name: nico-public-core
-          keep-state: true
+      - name: Reuse the Core Buildx cache
+        run: |
+          set -euo pipefail
+          builder=nico-public-core
+          docker buildx inspect "$builder" >/dev/null 2>&1 || \
+            docker buildx create --name "$builder" --driver docker-container
+          docker buildx inspect --bootstrap "$builder"
+          echo "BUILDX_BUILDER=$builder" >> "$GITHUB_ENV"
 
       - name: Build and publish Core
         env:
-          IMAGE_TAG: ${{ steps.publication.outputs.tag }}
+          IMAGE_TAG: ${{ needs.prepare.outputs.tag }}
         run: |
           set -euo pipefail
           make images-core \
@@ -109,7 +128,8 @@ jobs:
             IMAGE_REGISTRY="$IMAGE_REGISTRY" \
             IMAGE_TAG="$IMAGE_TAG" \
             OCI_SOURCE="$OCI_SOURCE" \
-            VCS_REF="$GITHUB_SHA"
+            VCS_REF="$GITHUB_SHA" \
+            VERSION="$IMAGE_TAG"
           if [[ "${{ inputs.publish_main }}" == true ]]; then
             docker buildx imagetools create \
               --tag "$IMAGE_REGISTRY/core:main" \
@@ -118,7 +138,7 @@ jobs:
 
       - name: Verify the published manifest
         env:
-          IMAGE_TAG: ${{ steps.publication.outputs.tag }}
+          IMAGE_TAG: ${{ needs.prepare.outputs.tag }}
         run: |
           set -euo pipefail
           docker buildx imagetools inspect "$IMAGE_REGISTRY/core:$IMAGE_TAG"
@@ -126,7 +146,8 @@ jobs:
           echo "\`$IMAGE_REGISTRY/core:$IMAGE_TAG\` (linux/amd64)" >> "$GITHUB_STEP_SUMMARY"
 
   boot-artifacts-x86_64:
-    if: inputs.build_boot_artifacts
+    needs: prepare
+    if: inputs.build_x86_boot_artifacts
     runs-on: [self-hosted, linux, x64, nico-builder]
     timeout-minutes: 360
     steps:
@@ -152,27 +173,9 @@ jobs:
           docker_root=$(docker info --format '{{.DockerRootDir}}')
           available_gib=$(df -Pk "$docker_root" | awk 'NR == 2 {print int($4 / 1024 / 1024)}')
           if (( available_gib < 120 )); then
-            echo "Boot-artifact publication requires at least 120 GiB free under $docker_root; found ${available_gib} GiB." >&2
+            echo "x86_64 boot publication requires at least 120 GiB free under $docker_root; found ${available_gib} GiB." >&2
             exit 1
           fi
-
-      - name: Resolve publication tag
-        id: publication
-        env:
-          REQUESTED_TAG: ${{ inputs.image_tag }}
-          PUBLISH_MAIN: ${{ inputs.publish_main }}
-        run: |
-          set -euo pipefail
-          tag=${REQUESTED_TAG:-main-${GITHUB_SHA:0:12}}
-          if [[ ! "$tag" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
-            echo "Invalid OCI tag: $tag" >&2
-            exit 1
-          fi
-          if [[ "$PUBLISH_MAIN" == true && "$GITHUB_REF_NAME" != "${{ github.event.repository.default_branch }}" ]]; then
-            echo "The moving main tag can only be updated from the default branch." >&2
-            exit 1
-          fi
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -181,15 +184,18 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Configure Buildx
-        uses: docker/setup-buildx-action@v3
-        with:
-          name: nico-public-boot
-          keep-state: true
+      - name: Reuse the x86_64 boot Buildx cache
+        run: |
+          set -euo pipefail
+          builder=nico-public-x86-boot
+          docker buildx inspect "$builder" >/dev/null 2>&1 || \
+            docker buildx create --name "$builder" --driver docker-container
+          docker buildx inspect --bootstrap "$builder"
+          echo "BUILDX_BUILDER=$builder" >> "$GITHUB_ENV"
 
-      - name: Build and publish x86_64 boot artifacts
+      - name: Build and publish x86_64 host boot artifacts
         env:
-          IMAGE_TAG: ${{ steps.publication.outputs.tag }}
+          IMAGE_TAG: ${{ needs.prepare.outputs.tag }}
         run: |
           set -euo pipefail
           make images-boot-artifacts \
@@ -197,7 +203,8 @@ jobs:
             IMAGE_REGISTRY="$IMAGE_REGISTRY" \
             IMAGE_TAG="$IMAGE_TAG" \
             OCI_SOURCE="$OCI_SOURCE" \
-            VCS_REF="$GITHUB_SHA"
+            VCS_REF="$GITHUB_SHA" \
+            VERSION="$IMAGE_TAG"
           if [[ "${{ inputs.publish_main }}" == true ]]; then
             docker buildx imagetools create \
               --tag "$IMAGE_REGISTRY/boot-artifacts-x86_64:main" \
@@ -206,17 +213,214 @@ jobs:
 
       - name: Verify the published manifest
         env:
-          IMAGE_TAG: ${{ steps.publication.outputs.tag }}
+          IMAGE_TAG: ${{ needs.prepare.outputs.tag }}
         run: |
           set -euo pipefail
           docker buildx imagetools inspect "$IMAGE_REGISTRY/boot-artifacts-x86_64:$IMAGE_TAG"
-          echo "### Published x86_64 boot artifacts" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Published x86_64 host boot artifacts" >> "$GITHUB_STEP_SUMMARY"
           echo "\`$IMAGE_REGISTRY/boot-artifacts-x86_64:$IMAGE_TAG\` (linux/amd64)" >> "$GITHUB_STEP_SUMMARY"
 
+  boot-artifacts-grace-aarch64:
+    needs: prepare
+    if: inputs.build_grace_arm64_boot_artifacts
+    runs-on: [self-hosted, linux, x64, nico-builder]
+    timeout-minutes: 480
+    steps:
+      - name: Check out the selected Core revision
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          submodules: recursive
+
+      - name: Check out the PXEye build driver
+        uses: actions/checkout@v4
+        with:
+          repository: DaoCloud/PXEye
+          ref: main
+          path: pxeye-builder
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Check the dedicated build host
+        run: |
+          set -euo pipefail
+          for command in docker git jq python3; do
+            command -v "$command" >/dev/null || {
+              echo "Missing required command: $command" >&2
+              exit 1
+            }
+          done
+          docker info >/dev/null
+          docker buildx version
+          docker_root=$(docker info --format '{{.DockerRootDir}}')
+          available_gib=$(df -Pk "$docker_root" | awk 'NR == 2 {print int($4 / 1024 / 1024)}')
+          if (( available_gib < 150 )); then
+            echo "Grace publication requires at least 150 GiB free under $docker_root; found ${available_gib} GiB." >&2
+            exit 1
+          fi
+
+      - name: Restore Grace package downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/nico-public/grace-mkosi-packages
+          key: grace-mkosi-packages-${{ runner.os }}-${{ hashFiles('pxeye-builder/tools/arm64-mkosi.sh') }}
+          restore-keys: |
+            grace-mkosi-packages-${{ runner.os }}-
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Reuse the Grace boot Buildx cache
+        run: |
+          set -euo pipefail
+          builder=nico-public-grace-boot
+          docker buildx inspect "$builder" >/dev/null 2>&1 || \
+            docker buildx create --name "$builder" --driver docker-container
+          docker buildx inspect --bootstrap "$builder"
+          echo "BUILDX_BUILDER=$builder" >> "$GITHUB_ENV"
+
+      - name: Build and publish Grace ARM64 host boot artifacts
+        env:
+          IMAGE_TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.cache/nico-public/grace-mkosi-packages"
+          python3 pxeye-builder/tools/source-build.py boot-arm64 \
+            --repo "$GITHUB_WORKSPACE/pxeye-builder" \
+            --output "$RUNNER_TEMP/grace-source-builds" \
+            --scout-ca "$GITHUB_WORKSPACE/dev/forge_prodroot.pem" \
+            --package-cache "$HOME/.cache/nico-public/grace-mkosi-packages" \
+            --jobs "$(getconf _NPROCESSORS_ONLN)"
+          lock=$(find "$RUNNER_TEMP/grace-source-builds" -name build-lock.json -print -quit)
+          test -n "$lock"
+          test "$(jq -r '.status' "$lock")" = complete
+          test "$(jq -r '.sources.core.commit' "$lock")" = "$GITHUB_SHA"
+          materials=$(jq -r '.arm64_materials.directory' "$lock")
+          python3 scripts/publish-grace-material-image.py \
+            --materials "$materials" \
+            --image "$IMAGE_REGISTRY/boot-artifacts-grace-aarch64:$IMAGE_TAG" \
+            --revision "$GITHUB_SHA" \
+            --version "$IMAGE_TAG" \
+            --source "$OCI_SOURCE"
+          if [[ "${{ inputs.publish_main }}" == true ]]; then
+            docker buildx imagetools create \
+              --tag "$IMAGE_REGISTRY/boot-artifacts-grace-aarch64:main" \
+              "$IMAGE_REGISTRY/boot-artifacts-grace-aarch64:$IMAGE_TAG"
+          fi
+
+      - name: Verify the published manifest
+        env:
+          IMAGE_TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+          docker buildx imagetools inspect "$IMAGE_REGISTRY/boot-artifacts-grace-aarch64:$IMAGE_TAG"
+          echo "### Published Grace ARM64 host boot artifacts" >> "$GITHUB_STEP_SUMMARY"
+          echo "\`$IMAGE_REGISTRY/boot-artifacts-grace-aarch64:$IMAGE_TAG\` (linux/amd64 carrier, ARM64 payload)" >> "$GITHUB_STEP_SUMMARY"
+
+  boot-artifacts-dpu-aarch64:
+    needs: prepare
+    if: inputs.build_dpu_boot_artifacts
+    runs-on: [self-hosted, linux, x64, nico-builder]
+    timeout-minutes: 480
+    steps:
+      - name: Check out the selected revision
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          submodules: recursive
+
+      - name: Check the dedicated build host
+        run: |
+          set -euo pipefail
+          for command in docker git make cargo cargo-make; do
+            command -v "$command" >/dev/null || {
+              echo "Missing required command: $command" >&2
+              echo "Prepare the runner with scripts/setup-build-host.sh." >&2
+              exit 1
+            }
+          done
+          docker info >/dev/null
+          docker buildx version
+          docker_root=$(docker info --format '{{.DockerRootDir}}')
+          available_gib=$(df -Pk "$docker_root" | awk 'NR == 2 {print int($4 / 1024 / 1024)}')
+          if (( available_gib < 100 )); then
+            echo "DPU publication requires at least 100 GiB free under $docker_root; found ${available_gib} GiB." >&2
+            exit 1
+          fi
+
+      - name: Restore the BlueField BFB download
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/nico-public/dpu-bfb
+          key: dpu-bfb-${{ hashFiles('pxe/Makefile.toml') }}
+          restore-keys: |
+            dpu-bfb-
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Reuse the DPU boot Buildx cache
+        run: |
+          set -euo pipefail
+          builder=nico-public-dpu-boot
+          docker buildx inspect "$builder" >/dev/null 2>&1 || \
+            docker buildx create --name "$builder" --driver docker-container
+          docker buildx inspect --bootstrap "$builder"
+          echo "BUILDX_BUILDER=$builder" >> "$GITHUB_ENV"
+
+      - name: Build and publish BlueField DPU boot artifacts
+        env:
+          IMAGE_TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.cache/nico-public/dpu-bfb" /tmp/bfb-dump
+          find "$HOME/.cache/nico-public/dpu-bfb" -maxdepth 1 -type f -name '*.bfb' \
+            -exec cp -p {} /tmp/bfb-dump/ \;
+          make images-bfb \
+            DPU_ARCHES=amd64 \
+            DPU_BOOT_IMAGE_NAME=boot-artifacts-dpu-aarch64 \
+            IMAGE_REGISTRY="$IMAGE_REGISTRY" \
+            IMAGE_TAG="$IMAGE_TAG" \
+            OCI_SOURCE="$OCI_SOURCE" \
+            VCS_REF="$GITHUB_SHA" \
+            VERSION="$IMAGE_TAG"
+          find /tmp/bfb-dump -maxdepth 1 -type f -name '*.bfb' \
+            -exec cp -p {} "$HOME/.cache/nico-public/dpu-bfb/" \;
+          if [[ "${{ inputs.publish_main }}" == true ]]; then
+            docker buildx imagetools create \
+              --tag "$IMAGE_REGISTRY/boot-artifacts-dpu-aarch64:main" \
+              "$IMAGE_REGISTRY/boot-artifacts-dpu-aarch64:$IMAGE_TAG"
+          fi
+
+      - name: Verify the published manifest
+        env:
+          IMAGE_TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+          docker buildx imagetools inspect "$IMAGE_REGISTRY/boot-artifacts-dpu-aarch64:$IMAGE_TAG"
+          echo "### Published BlueField DPU boot artifacts" >> "$GITHUB_STEP_SUMMARY"
+          echo "\`$IMAGE_REGISTRY/boot-artifacts-dpu-aarch64:$IMAGE_TAG\` (linux/amd64 carrier, ARM64 BFB payload)" >> "$GITHUB_STEP_SUMMARY"
+
   verify-public-access:
-    needs: [core, boot-artifacts-x86_64]
+    needs:
+      - prepare
+      - core
+      - boot-artifacts-x86_64
+      - boot-artifacts-grace-aarch64
+      - boot-artifacts-dpu-aarch64
     if: >-
       always() &&
+      needs.prepare.result == 'success' &&
       !contains(needs.*.result, 'failure') &&
       !contains(needs.*.result, 'cancelled')
     runs-on: ubuntu-24.04
@@ -226,20 +430,18 @@ jobs:
 
       - name: Verify anonymous access
         env:
-          REQUESTED_TAG: ${{ inputs.image_tag }}
+          IMAGE_TAG: ${{ needs.prepare.outputs.tag }}
         run: |
           set -euo pipefail
-          tag=${REQUESTED_TAG:-main-${GITHUB_SHA:0:12}}
-          if [[ "${{ inputs.build_core }}" == true ]]; then
-            if ! docker buildx imagetools inspect "$IMAGE_REGISTRY/core:$tag"; then
-              echo "::error::Set the GHCR package ssmallmonster/core visibility to Public, then rerun this verification." >&2
+          images=()
+          [[ "${{ inputs.build_core }}" == true ]] && images+=(core)
+          [[ "${{ inputs.build_x86_boot_artifacts }}" == true ]] && images+=(boot-artifacts-x86_64)
+          [[ "${{ inputs.build_grace_arm64_boot_artifacts }}" == true ]] && images+=(boot-artifacts-grace-aarch64)
+          [[ "${{ inputs.build_dpu_boot_artifacts }}" == true ]] && images+=(boot-artifacts-dpu-aarch64)
+          for image in "${images[@]}"; do
+            if ! docker buildx imagetools inspect "$IMAGE_REGISTRY/$image:$IMAGE_TAG"; then
+              echo "::error::Set the GHCR package ssmallmonster/$image visibility to Public, then rerun this verification." >&2
               exit 1
             fi
-          fi
-          if [[ "${{ inputs.build_boot_artifacts }}" == true ]]; then
-            if ! docker buildx imagetools inspect "$IMAGE_REGISTRY/boot-artifacts-x86_64:$tag"; then
-              echo "::error::Set the GHCR package ssmallmonster/boot-artifacts-x86_64 visibility to Public, then rerun this verification." >&2
-              exit 1
-            fi
-          fi
-          echo "Anonymous GHCR reads succeeded." >> "$GITHUB_STEP_SUMMARY"
+          done
+          echo "Anonymous GHCR reads succeeded for ${#images[@]} image(s)." >> "$GITHUB_STEP_SUMMARY"

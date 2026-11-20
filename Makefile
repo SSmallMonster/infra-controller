@@ -117,6 +117,7 @@ KEA_VERSION ?= $(shell cat dev/docker/kea.version)
 NICO_ARCHES ?= amd64 arm64
 BOOT_ARTIFACTS_ARCHES ?= amd64 arm64
 DPU_ARCHES ?= amd64 arm64
+DPU_BOOT_IMAGE_NAME ?= boot-artifacts-aarch64
 
 check-arches = $(if $(strip $(1)),,$(error $(2) must not be empty))$(if $(filter-out amd64 arm64,$(1)),$(error $(2) must be a subset of "amd64 arm64", got: $(1)))
 
@@ -290,12 +291,13 @@ images-bfb: ## Build the aarch64 DPU BFB boot-artifact image (DPU_ARCHES="amd64 
 	@set -e; \
 	tags=""; \
 	for arch in $(DPU_ARCHES); do \
-		tag=$(IMAGE_REGISTRY)/boot-artifacts-aarch64:$(IMAGE_TAG)-$$arch; \
+		tag=$(IMAGE_REGISTRY)/$(DPU_BOOT_IMAGE_NAME):$(IMAGE_TAG)-$$arch; \
 		docker buildx build --platform linux/$$arch --push --build-arg CONTAINER_RUNTIME_AARCH64=$(BOOT_ARTIFACTS_RUNTIME_IMAGE) \
+			--build-arg OCI_SOURCE=$(OCI_SOURCE) --build-arg VCS_REF=$(VCS_REF) --build-arg VERSION=$(VERSION) \
 			-t $$tag --file dev/docker/Dockerfile.release-artifacts-aarch64 . ; \
 		tags="$$tags $$tag"; \
 	done; \
-	docker buildx imagetools create -t $(IMAGE_REGISTRY)/boot-artifacts-aarch64:$(IMAGE_TAG) $$tags
+	docker buildx imagetools create -t $(IMAGE_REGISTRY)/$(DPU_BOOT_IMAGE_NAME):$(IMAGE_TAG) $$tags
 
 images-bfb-arm: ## Build the aarch64 DPU BFB boot-artifact image in a native ARM64 build container
 	@arch="$$(docker info --format '{{.Architecture}}')"; \
@@ -327,10 +329,11 @@ images-bfb-arm: ## Build the aarch64 DPU BFB boot-artifact image in a native ARM
 			carbide-pxe-builder-aarch64 \
 			sh -c 'git config --global --add safe.directory /code && git config --global --add safe.directory /code/pxe/ipxe/upstream && r=0; cargo make --cwd pxe --env SA_ENABLEMENT=1 build-boot-artifacts-bfb-sa || r=$$?; chown -R $${HOST_UID}:$${HOST_GID} /code 2>/dev/null || true; exit $$r'
 	docker buildx build --platform linux/arm64 --push --build-arg CONTAINER_RUNTIME_AARCH64=$(BOOT_ARTIFACTS_RUNTIME_IMAGE) \
-		-t $(IMAGE_REGISTRY)/boot-artifacts-aarch64:$(IMAGE_TAG)-arm64 \
+		--build-arg OCI_SOURCE=$(OCI_SOURCE) --build-arg VCS_REF=$(VCS_REF) --build-arg VERSION=$(VERSION) \
+		-t $(IMAGE_REGISTRY)/$(DPU_BOOT_IMAGE_NAME):$(IMAGE_TAG)-arm64 \
 		--file dev/docker/Dockerfile.release-artifacts-aarch64 .
-	docker buildx imagetools create -t $(IMAGE_REGISTRY)/boot-artifacts-aarch64:$(IMAGE_TAG) \
-		$(IMAGE_REGISTRY)/boot-artifacts-aarch64:$(IMAGE_TAG)-arm64
+	docker buildx imagetools create -t $(IMAGE_REGISTRY)/$(DPU_BOOT_IMAGE_NAME):$(IMAGE_TAG) \
+		$(IMAGE_REGISTRY)/$(DPU_BOOT_IMAGE_NAME):$(IMAGE_TAG)-arm64
 
 # The machine lifecycle test (tests/machine-lifecycle) is a QA tool, not part of
 # the deployable stack, so images-all does not include it. Its Dockerfile copies
